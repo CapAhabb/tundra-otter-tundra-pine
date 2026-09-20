@@ -1,0 +1,964 @@
+import { buildHouse, circleHitsRect, pointInRect, roomAt } from "./house";
+import { stepsFor } from "./missions";
+import { gameAudio } from "./audio";
+import { KIT_LABELS, type DrillId, type FamilyProfile, type HouseWorld, type Interactable, type KitItemId, type MissionStep, type Rect, type VisualShell } from "./types";
+import { saveChildObservation } from "./child-progress";
+import { drawKaraRose } from "./kara-art";
+
+export type HudChoice = { id: string; label: string };
+
+export type HudState = {
+  roomName: string;
+  nearby: Interactable | null;
+  steps: MissionStep[];
+  powerOut: boolean;
+  flashlight: boolean;
+  collected: KitItemId[];
+  dialogue: { speaker: string; text: string } | null;
+  choices: HudChoice[] | null;
+  complete: boolean;
+  hint: string;
+  prompt: string | null;
+  playerName: string;
+};
+
+const ASSETS: Record<string, string> = {
+  player: "/game/player-sheet.png",
+  neighbor: "/game/neighbor-sheet.png",
+  sofa: "/game/sofa.png",
+  bed: "/game/bed.png",
+  fridge: "/game/fridge.png",
+  table: "/game/table.png",
+  counter: "/game/counter.png",
+  breaker: "/game/breaker.png",
+  generator: "/game/generator.png",
+  gobag: "/game/gobag.png",
+  medkit: "/game/medkit.png",
+  flashlight: "/game/flashlight.png",
+  water: "/game/water.png",
+  radio: "/game/radio.png",
+  food: "/game/food.png",
+  batteries: "/game/batteries.png",
+  extinguisher: "/game/extinguisher.png",
+  whistle: "/game/whistle.png",
+  wood: "/game/floor-wood.jpg",
+  tile: "/game/floor-tile.jpg",
+  carpet: "/game/floor-carpet.jpg",
+  grass: "/game/floor-grass.jpg",
+  sand: "/game/floor-sand.jpg",
+  forest: "/game/floor-forest.jpg",
+  concrete: "/game/floor-concrete.jpg",
+  bath: "/game/floor-bath.jpg",
+};
+
+const SPEED = 168;
+const PLAYER_R = 12;
+const FIXED = 1 / 60;
+
+type Dir = "down" | "left" | "right" | "up";
+
+function loadImage(src: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+function yawFromMove(mx: number, my: number): number {
+  return Math.atan2(-mx, -my);
+}
+
+export class ReadyEngine {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  profile: FamilyProfile;
+  playerId: string;
+  drill: DrillId;
+  world: HouseWorld;
+  images: Record<string, HTMLImageElement> = {};
+  keys = new Set<string>();
+  injected: string[] | null = null;
+  stick = { x: 0, y: 0 };
+  px = 0;
+  py = 0;
+  vx = 0;
+  vy = 0;
+  yaw = Math.PI;
+  dir: Dir = "down";
+  walkT = 0;
+  camX = 0;
+  camY = 0;
+  running = false;
+  acc = 0;
+  last = 0;
+  raf = 0;
+  powerOut = false;
+  flashlight = false;
+  breakersDone = false;
+  generatorDone = false;
+  neighborTalked = false;
+  collected = new Set<KitItemId>();
+  checked = new Set<string>();
+  hiddenProps = new Set<string>();
+  steps: MissionStep[] = [];
+  dialogue: { speaker: string; text: string } | null = null;
+  complete = false;
+  shake = 0;
+  particles: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
+  idle = 0;
+  onHud?: (h: HudState) => void;
+  onComplete?: (stars: number, summary: string) => void;
+  playerName = "";
+  reduced = false;
+  finishPosted = false;
+  interactHeld = false;
+  interactWas = false;
+  private talkQueue: { speaker: string; text: string }[] = [];
+  private pendingChoices: HudChoice[] | null = null;
+  private scheduledChoices: HudChoice[] | null = null;
+  private hintedStep = "";
+  private taught = new Set<string>();
+  private karaMode: "idle" | "guiding" | "teaching" | "attention" | "success" = "idle";
+  private kx = 0;
+  private ky = 0;
+  private karaDust: { x: number; y: number; vx: number; vy: number; life: number; s: number }[] = [];
+  private hudKey = "";
+
+  constructor(
+    canvas: HTMLCanvasElement,
+    profile: FamilyProfile,
+    playerId: string,
+    drill: DrillId,
+    shell?: VisualShell | null,
+  ) {
+    this.canvas = canvas;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("No 2d context");
+    this.ctx = ctx;
+    this.profile = profile;
+    this.playerId = playerId;
+    this.drill = drill;
+    this.world = buildHouse(profile, shell);
+    this.px = this.world.spawn.x;
+    this.py = this.world.spawn.y;
+    this.kx = this.px + 22;
+    this.ky = this.py - 52;
+    this.camX = this.px;
+    this.camY = this.py;
+    this.playerName = profile.members.find((m) => m.id === playerId)?.name ?? "You";
+    this.steps = stepsFor(drill, profile, this.playerName);
+    this.reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    if (drill === "power-out") this.powerOut = true;
+  }
+
+  async start() {
+    const entries = await Promise.all(
+      Object.entries(ASSETS).map(async ([k, src]) => [k, await loadImage(src)] as const),
+    );
+    this.images = Object.fromEntries(
+      entries.filter((e): e is readonly [string, HTMLImageElement] => e[1] != null),
+    );
+    this.resize();
+    this.bind();
+    this.running = true;
+    this.last = performance.now();
+    let drillLine = `Find everyone in the ${this.profile.familyName} family, then meet at ${this.profile.plan.meetingPlace}.`;
+    if (this.drill === "power-out") {
+      gameAudio.outage();
+      this.shake = this.reduced ? 0 : 10;
+      drillLine = `The lights just went out. That's okay, ${this.playerName}. We have a plan. First, find a flashlight.`;
+    } else if (this.drill === "pack-kit") {
+      drillLine = `Let's pack the ${this.profile.familyName} kit. Walk the house and pick up each item on the list.`;
+    } else if (this.drill === "neighbor") {
+      const n = this.profile.neighbors[0];
+      drillLine = n
+        ? `If something happens, your family checks in with ${n.name}. Let's walk over.`
+        : "Let's practice walking to your neighbor.";
+    }
+    this.talkQueue = [
+      { speaker: "Kara", text: "Welcome to Event Sim. Hi, I’m Kara Wari. You can call me Kara. I’m your guide." },
+      { speaker: "Kara", text: "My name comes from Karariwari, a Pawnee name for the North Star — “the one who does not move.”" },
+      { speaker: "Kara", text: "Like the North Star, I’m here to help you keep your bearings while things around you change. Look for my compass if you need help." },
+      { speaker: "Kara", text: drillLine },
+    ];
+    this.advanceTalk();
+    this.emit();
+    this.loop(this.last);
+    this.installProbe();
+  }
+
+  stop() {
+    this.running = false;
+    cancelAnimationFrame(this.raf);
+    this.unbind();
+    if (window.__controlsTest) delete window.__controlsTest;
+  }
+
+  resize() {
+    const parent = this.canvas.parentElement;
+    const w = parent?.clientWidth ?? 800;
+    const h = parent?.clientHeight ?? 600;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.canvas.width = Math.floor(w * dpr);
+    this.canvas.height = Math.floor(h * dpr);
+    this.canvas.style.width = `${w}px`;
+    this.canvas.style.height = `${h}px`;
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  private onKeyDown = (e: KeyboardEvent) => {
+    this.keys.add(e.code);
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) {
+      e.preventDefault();
+    }
+    if (e.code === "KeyE" || e.code === "Space") this.interactHeld = true;
+    if (e.code === "Escape" && this.dialogue && !this.pendingChoices) {
+      this.advanceTalk();
+      this.emit();
+    }
+  };
+  private onKeyUp = (e: KeyboardEvent) => {
+    this.keys.delete(e.code);
+    if (e.code === "KeyE" || e.code === "Space") this.interactHeld = false;
+  };
+  private onBlur = () => {
+    this.keys.clear();
+    this.stick.x = 0;
+    this.stick.y = 0;
+    this.interactHeld = false;
+  };
+
+  private bind() {
+    window.addEventListener("keydown", this.onKeyDown);
+    window.addEventListener("keyup", this.onKeyUp);
+    window.addEventListener("blur", this.onBlur);
+    document.addEventListener("visibilitychange", this.onBlur);
+    window.addEventListener("resize", this.onResize);
+  }
+  private unbind() {
+    window.removeEventListener("keydown", this.onKeyDown);
+    window.removeEventListener("keyup", this.onKeyUp);
+    window.removeEventListener("blur", this.onBlur);
+    document.removeEventListener("visibilitychange", this.onBlur);
+    window.removeEventListener("resize", this.onResize);
+  }
+  private onResize = () => this.resize();
+
+  setStick(x: number, y: number) {
+    this.stick.x = x;
+    this.stick.y = y;
+  }
+
+  requestInteract() {
+    this.interactHeld = true;
+  }
+
+  dismissDialogue() {
+    if (this.pendingChoices) return;
+    this.advanceTalk();
+    this.emit();
+  }
+
+  chooseLesson(id: string) {
+    if (!this.pendingChoices) return;
+    this.pendingChoices = null;
+    if (id === "flash-ok") {
+      saveChildObservation("flashlight", "Child marked flashlight as checked.");
+      this.karaSay("Nice job. Now you know it’s ready.");
+    } else if (id === "flash-batteries") {
+      saveChildObservation("flashlight", "Child noted the flashlight may need batteries.");
+      this.karaSay("Good catch. That’s exactly why we check before an emergency.");
+    } else if (id === "water-yes" || id === "water-not-sure") {
+      saveChildObservation("water", id === "water-yes" ? "Child knows extra water location." : "Child is unsure where extra water is.");
+      this.karaSay(id === "water-yes" ? "Good. Remember that spot." : "Ask a grown-up later. For now, you found the water.");
+    }
+    this.karaMode = "success";
+    this.emit();
+  }
+
+  private karaSay(text: string) {
+    this.talkQueue.push({ speaker: "Kara", text });
+    if (!this.dialogue) this.advanceTalk();
+  }
+
+  private advanceTalk() {
+    const next = this.talkQueue.shift();
+    this.dialogue = next ?? null;
+    if (this.dialogue && this.talkQueue.length === 0 && this.scheduledChoices) {
+      this.pendingChoices = this.scheduledChoices;
+      this.scheduledChoices = null;
+    }
+    this.karaMode = this.dialogue ? "teaching" : "idle";
+    if (!this.dialogue && this.complete) this.karaMode = "success";
+  }
+
+  private held(code: string) {
+    if (this.injected) return this.injected.includes(code);
+    return this.keys.has(code);
+  }
+
+  private loop = (t: number) => {
+    if (!this.running) return;
+    const dt = Math.min((t - this.last) / 1000, 0.1);
+    this.last = t;
+    this.acc += dt;
+    while (this.acc >= FIXED) {
+      this.step(FIXED);
+      this.acc -= FIXED;
+    }
+    this.draw();
+    this.raf = requestAnimationFrame(this.loop);
+  };
+
+  private step(dt: number) {
+    if (this.dialogue) {
+      this.vx = 0;
+      this.vy = 0;
+      this.emitMove();
+      if (this.interactHeld && !this.interactWas && !this.pendingChoices) this.advanceTalk();
+      this.interactWas = this.interactHeld;
+      this.shake = Math.max(0, this.shake - dt * 18);
+      this.updateKara(dt);
+      return;
+    }
+
+    let mx = this.stick.x;
+    let my = this.stick.y;
+    if (this.held("KeyA") || this.held("ArrowLeft")) mx -= 1;
+    if (this.held("KeyD") || this.held("ArrowRight")) mx += 1;
+    if (this.held("KeyW") || this.held("ArrowUp")) my -= 1;
+    if (this.held("KeyS") || this.held("ArrowDown")) my += 1;
+    const mag = Math.hypot(mx, my);
+    if (mag > 1) {
+      mx /= mag;
+      my /= mag;
+    }
+    this.vx = mx * SPEED;
+    this.vy = my * SPEED;
+    if (mag > 0.15) {
+      this.yaw = yawFromMove(mx, my);
+      if (Math.abs(mx) > Math.abs(my)) this.dir = mx < 0 ? "left" : "right";
+      else this.dir = my < 0 ? "up" : "down";
+      this.walkT += dt * 7;
+      gameAudio.footstep();
+      this.idle = 0;
+    } else {
+      this.walkT = 0;
+      this.idle += dt;
+    }
+
+    const nx = this.px + this.vx * dt;
+    const ny = this.py + this.vy * dt;
+    if (this.canStand(nx, this.py)) this.px = nx;
+    if (this.canStand(this.px, ny)) this.py = ny;
+
+    const follow = this.reduced ? 1 : 1 - Math.pow(0.001, dt);
+    this.camX += (this.px - this.camX) * follow;
+    this.camY += (this.py - this.camY) * follow;
+    this.updateKara(dt);
+    this.shake = Math.max(0, this.shake - dt * 18);
+
+    for (const p of this.particles) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt;
+    }
+    this.particles = this.particles.filter((p) => p.life > 0);
+
+    const just = this.interactHeld && !this.interactWas;
+    this.interactWas = this.interactHeld;
+    if (!this.held("KeyE") && !this.held("Space")) this.interactHeld = false;
+
+    if (just) this.tryInteract();
+
+    if (this.idle > 14 && !this.complete && !this.dialogue) {
+      this.idle = 0;
+      const next = this.steps.find((st) => !st.done);
+      if (next && this.hintedStep !== next.id) {
+        this.hintedStep = next.id;
+        this.karaMode = "attention";
+        this.karaSay(next.hint);
+        gameAudio.kara();
+      }
+    }
+
+    this.emit();
+  }
+
+  private emitMove() {
+    const follow = 0.2;
+    this.camX += (this.px - this.camX) * follow;
+    this.camY += (this.py - this.camY) * follow;
+  }
+
+  private canStand(x: number, y: number) {
+    const onWalk = this.world.walk.some((r) => pointInRect(x, y, r));
+    if (!onWalk) return false;
+    for (const p of this.world.props) {
+      if (!p.collide || this.hiddenProps.has(p.id)) continue;
+      const body: Rect = { x: p.x + 8, y: p.y + p.h * 0.45, w: p.w - 16, h: p.h * 0.5 };
+      if (circleHitsRect(x, y, PLAYER_R, body)) return false;
+    }
+    return true;
+  }
+
+  private nearby(): Interactable | null {
+    let best: Interactable | null = null;
+    let bestD = 9999;
+    for (const it of this.world.interactables) {
+      if (this.hiddenProps.has(it.id)) continue;
+      if (it.kind === "family" && it.memberId === this.playerId) continue;
+      if (it.kind === "pickup" && it.item && this.collected.has(it.item)) continue;
+      const d = Math.hypot(it.x - this.px, it.y - this.py);
+      if (d < it.r && d < bestD) {
+        best = it;
+        bestD = d;
+      }
+    }
+    return best;
+  }
+
+  private mark(id: string) {
+    this.steps = this.steps.map((s) => (s.id === id ? { ...s, done: true } : s));
+  }
+
+  private tryInteract() {
+    const n = this.nearby();
+    if (!n) return;
+    if (n.kind === "pickup" && n.item) {
+      this.collected.add(n.item);
+      this.hiddenProps.add(n.id);
+      this.burst(n.x, n.y);
+      gameAudio.pickup();
+      this.mark(`kit-${n.item}`);
+      if (n.item === "flashlight") {
+        this.flashlight = true;
+        this.mark("flashlight");
+        this.startFlashlightLesson(this.drill === "power-out");
+      } else if (n.item === "water") {
+        this.startWaterLesson();
+      } else if (n.item === "food") {
+        this.karaSay("You found extra food. Keep some that does not need a fridge.");
+      } else if (n.item === "radio") {
+        this.karaSay("A radio can help you hear news if phones stop working.");
+      } else if (n.item === "medkit") {
+        this.karaSay("You found the first-aid kit. Grown-ups handle medicine. You just need to know where it lives.");
+      } else {
+        this.dialogue = {
+          speaker: "Kara",
+          text: `You found the ${KIT_LABELS[n.item].toLowerCase()}. ${this.collected.size} of ${this.profile.plan.kitItems.length} kit items.`,
+        };
+      }
+      this.maybeFinish();
+      return;
+    }
+    if (n.kind === "breaker") {
+      this.breakersDone = true;
+      this.mark("breaker");
+      gameAudio.click();
+      this.dialogue = {
+        speaker: "Kara",
+        text: this.profile.plan.hasGenerator
+          ? "Breakers are set. If the power stays off, we start the generator next."
+          : "Breakers are set. In an apartment, the building crew handles the rest. You did your part.",
+      };
+      this.maybeFinish();
+      return;
+    }
+    if (n.kind === "generator") {
+      this.generatorDone = true;
+      this.mark("generator");
+      this.powerOut = false;
+      gameAudio.success();
+      this.dialogue = {
+        speaker: "Kara",
+        text: "This home has a backup generator. It can help power some things during an outage, but not everything.",
+      };
+      this.maybeFinish();
+      return;
+    }
+    if (n.kind === "neighbor") {
+      this.neighborTalked = true;
+      this.mark("find-neighbor");
+      this.mark("talk-neighbor");
+      const nb = this.profile.neighbors[0];
+      this.dialogue = {
+        speaker: nb?.name ?? "Neighbor",
+        text: nb
+          ? `Hi ${this.playerName}. If you ever need help, come find me. ${nb.note}`
+          : `Hi ${this.playerName}. You can knock any time.`,
+      };
+      gameAudio.success();
+      this.maybeFinish();
+      return;
+    }
+    if (n.kind === "family" && n.memberId) {
+      this.checked.add(n.memberId);
+      this.mark(`find-${n.memberId}`);
+      this.dialogue = {
+        speaker: n.label,
+        text: `I'm okay, ${this.playerName}. See you at ${this.profile.plan.meetingPlace}.`,
+      };
+      gameAudio.pickup();
+      this.maybeFinish();
+      return;
+    }
+    if (n.kind === "kit-station") {
+      const have = this.profile.plan.kitItems.every((id) => this.collected.has(id));
+      if (have) {
+        this.mark("station");
+        this.dialogue = {
+          speaker: "Kara",
+          text: "Kit corner is stocked. That's exactly how the family plan is written.",
+        };
+        gameAudio.success();
+        this.maybeFinish();
+      } else {
+        this.dialogue = {
+          speaker: "Kara",
+          text: "Not yet — look at the list and keep searching the house.",
+        };
+      }
+      return;
+    }
+    if (n.kind === "rally") {
+      const others = this.profile.members.filter((m) => m.id !== this.playerId);
+      const all = others.every((m) => this.checked.has(m.id));
+      if (this.drill === "rally" && all) {
+        this.mark("meeting");
+        this.dialogue = {
+          speaker: "Kara",
+          text: `This is your family meeting place. If everyone gets separated, this is where your plan says to meet.`,
+        };
+        gameAudio.success();
+        this.maybeFinish();
+      } else if (this.drill === "rally") {
+        this.dialogue = {
+          speaker: "Kara",
+          text: "Good, you found the meeting place. Check on the rest of the family first.",
+        };
+      }
+    }
+  }
+
+  private maybeFinish() {
+    if (this.drill === "power-out") {
+      const needGen = this.profile.plan.hasGenerator;
+      if (this.flashlight && this.breakersDone && (!needGen || this.generatorDone)) {
+        this.mark("done");
+        this.complete = true;
+        if (!this.profile.plan.hasGenerator) this.powerOut = false;
+      }
+    } else if (this.drill === "pack-kit") {
+      if (
+        this.profile.plan.kitItems.every((id) => this.collected.has(id)) &&
+        this.steps.find((s) => s.id === "station")?.done
+      ) {
+        this.complete = true;
+      }
+    } else if (this.drill === "neighbor") {
+      if (this.neighborTalked) this.complete = true;
+    } else if (this.drill === "rally") {
+      if (this.steps.every((s) => s.done)) this.complete = true;
+    }
+    if (this.complete && !this.finishPosted) {
+      this.finishPosted = true;
+      const done = this.steps.filter((s) => s.done).length;
+      const stars = done === this.steps.length ? 3 : done > this.steps.length / 2 ? 2 : 1;
+      const summary = this.summaryText();
+      window.setTimeout(() => this.onComplete?.(stars, summary), 900);
+    }
+  }
+
+  private summaryText() {
+    if (this.drill === "power-out") {
+      return `${this.playerName} practiced the lights-out plan: flashlight first, then the breakers${this.profile.plan.hasGenerator ? ", then the generator" : ""}.`;
+    }
+    if (this.drill === "pack-kit") {
+      return `${this.playerName} gathered the ${this.profile.familyName} kit and brought it to the kit corner.`;
+    }
+    if (this.drill === "neighbor") {
+      const n = this.profile.neighbors[0];
+      return `${this.playerName} practiced checking in with ${n?.name ?? "the neighbor"}.`;
+    }
+    return `${this.playerName} accounted for the family and met at ${this.profile.plan.meetingPlace}.`;
+  }
+
+  private burst(x: number, y: number) {
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      this.particles.push({
+        x,
+        y,
+        vx: Math.cos(a) * 40,
+        vy: Math.sin(a) * 40,
+        life: 0.45,
+      });
+    }
+  }
+
+  private startFlashlightLesson(afterOutage: boolean) {
+    if (this.taught.has("flashlight")) {
+      this.karaSay(
+        afterOutage
+          ? "Good. Now we can see. Next stop: the breaker panel in the utility room."
+          : `You found the flashlight. ${this.collected.size} of ${this.profile.plan.kitItems.length} kit items.`,
+      );
+      return;
+    }
+    this.taught.add("flashlight");
+    this.talkQueue = [
+      { speaker: "Kara", text: "Oh! You found the flashlight." },
+      { speaker: "Kara", text: "A flashlight only helps if it works when you need it." },
+      { speaker: "Kara", text: "Check the batteries." },
+    ];
+    if (afterOutage) {
+      this.talkQueue.push({
+        speaker: "Kara",
+        text: "When you are done checking, next stop is the breaker panel in the utility room.",
+      });
+    }
+    this.scheduledChoices = [
+      { id: "flash-ok", label: "Checked" },
+      { id: "flash-batteries", label: "Needs batteries" },
+    ];
+    this.advanceTalk();
+  }
+
+  private startWaterLesson() {
+    if (this.taught.has("water")) {
+      this.karaSay(`You found the water. ${this.collected.size} of ${this.profile.plan.kitItems.length} kit items.`);
+      return;
+    }
+    this.taught.add("water");
+    this.talkQueue = [
+      { speaker: "Kara", text: "You found the water supply." },
+      { speaker: "Kara", text: "In an emergency, clean water becomes really important." },
+      { speaker: "Kara", text: "Do you know where your family keeps extra water?" },
+    ];
+    this.scheduledChoices = [
+      { id: "water-yes", label: "Yes" },
+      { id: "water-not-sure", label: "Not sure" },
+    ];
+    this.advanceTalk();
+  }
+
+  private currentHint() {
+    const next = this.steps.find((s) => !s.done);
+    return next?.hint ?? "You finished this drill.";
+  }
+
+  private emit() {
+    const n = this.nearby();
+    const hud: HudState = {
+      roomName: roomAt(this.world, this.px, this.py)?.name ?? "House",
+      nearby: n,
+      steps: this.steps,
+      powerOut: this.powerOut,
+      flashlight: this.flashlight,
+      collected: [...this.collected],
+      dialogue: this.dialogue,
+      choices: this.pendingChoices,
+      complete: this.complete,
+      hint: this.currentHint(),
+      prompt: n ? n.label : null,
+      playerName: this.playerName,
+    };
+    const key = `${hud.roomName}|${n?.id ?? ""}|${hud.hint}|${hud.dialogue?.text ?? ""}|${this.steps.map((s) => (s.done ? 1 : 0)).join("")}|${hud.prompt ?? ""}`;
+    if (key === this.hudKey) return;
+    this.hudKey = key;
+    this.onHud?.(hud);
+  }
+
+  private zoom() {
+    const cssW = this.canvas.clientWidth;
+    return cssW < 500 ? 1.05 : 1.18;
+  }
+
+  private draw() {
+    const ctx = this.ctx;
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "#121820";
+    ctx.fillRect(0, 0, w, h);
+
+    const z = this.zoom();
+    const sx = this.reduced ? 0 : (Math.random() - 0.5) * this.shake;
+    const sy = this.reduced ? 0 : (Math.random() - 0.5) * this.shake;
+    ctx.save();
+    ctx.translate(w / 2 + sx, h / 2 + sy);
+    ctx.scale(z, z);
+    ctx.translate(-this.camX, -this.camY);
+
+    this.drawRooms(ctx);
+    const drawables: { y: number; draw: () => void }[] = [];
+    for (const p of this.world.props) {
+      if (this.hiddenProps.has(p.id)) continue;
+      drawables.push({ y: p.y + p.h, draw: () => this.drawProp(ctx, p) });
+    }
+    for (const it of this.world.interactables) {
+      if (it.kind === "neighbor") {
+        drawables.push({ y: it.y + 20, draw: () => this.drawNeighbor(ctx, it) });
+      }
+      if (it.kind === "family" && it.memberId !== this.playerId && !this.checked.has(it.memberId ?? "")) {
+        drawables.push({ y: it.y + 16, draw: () => this.drawPawn(ctx, it) });
+      }
+    }
+    drawables.push({ y: this.py + 18, draw: () => this.drawPlayer(ctx) });
+    drawables.sort((a, b) => a.y - b.y);
+    for (const d of drawables) d.draw();
+
+    for (const p of this.particles) {
+      ctx.globalAlpha = Math.max(0, p.life * 2);
+      ctx.fillStyle = "#f3eee4";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    if (this.powerOut) this.drawDark(ctx, w, h, z);
+
+    ctx.restore();
+  }
+
+  private drawRooms(ctx: CanvasRenderingContext2D) {
+    for (const room of this.world.rooms) {
+      const img = this.images[room.floor];
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(room.x, room.y, room.w, room.h);
+      ctx.clip();
+      if (img) {
+        const tw = 180;
+        for (let x = room.x; x < room.x + room.w; x += tw) {
+          for (let y = room.y; y < room.y + room.h; y += tw) {
+            ctx.drawImage(img, x, y, tw, tw);
+          }
+        }
+      } else {
+        ctx.fillStyle = "#d9d0c0";
+        ctx.fillRect(room.x, room.y, room.w, room.h);
+      }
+      ctx.restore();
+
+      ctx.strokeStyle = "#1b2430";
+      ctx.lineWidth = 8;
+      ctx.strokeRect(room.x + 4, room.y + 4, room.w - 8, room.h - 8);
+      ctx.strokeStyle = "#5f7d6d";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(room.x + 10, room.y + 10, room.w - 20, room.h - 20);
+
+      ctx.fillStyle = "rgba(27,36,48,0.38)";
+      ctx.font = "600 13px Nunito, sans-serif";
+      ctx.fillText(room.name, room.x + 22, room.y + 32);
+    }
+    for (const r of this.world.walk) {
+      if (r.w < 90 || r.h < 90) {
+        const img = this.images.wood;
+        if (img) ctx.drawImage(img, r.x, r.y, r.w, r.h);
+      }
+    }
+  }
+
+  private drawProp(ctx: CanvasRenderingContext2D, p: { kind: string; x: number; y: number; w: number; h: number }) {
+    const img = this.images[p.kind];
+    if (img) {
+      ctx.drawImage(img, p.x, p.y, p.w, p.h);
+      return;
+    }
+    ctx.fillStyle = "#8a9188";
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+  }
+
+  private drawSheet(
+    ctx: CanvasRenderingContext2D,
+    img: HTMLImageElement,
+    cols: number,
+    rows: number,
+    col: number,
+    row: number,
+    x: number,
+    y: number,
+    dw: number,
+    dh: number,
+  ) {
+    const cw = img.width / cols;
+    const ch = img.height / rows;
+    ctx.drawImage(img, col * cw, row * ch, cw, ch, x, y, dw, dh);
+  }
+
+  private drawPlayer(ctx: CanvasRenderingContext2D) {
+    const img = this.images.player;
+    const moving = Math.hypot(this.vx, this.vy) > 8;
+    const frame = moving ? Math.floor(this.walkT) % 4 : 0;
+    const row = this.dir === "down" ? 0 : this.dir === "left" ? 1 : this.dir === "right" ? 2 : 3;
+    const dw = 52;
+    const dh = 64;
+    if (img) this.drawSheet(ctx, img, 4, 4, frame, row, this.px - dw / 2, this.py - dh + 8, dw, dh);
+    this.drawKara(ctx);
+  }
+
+  private objectivePoint(): { x: number; y: number } | null {
+    const next = this.steps.find((st) => !st.done);
+    if (!next) return null;
+    const items = this.world.interactables;
+    const hit =
+      items.find((it) => next.id === "flashlight" && it.item === "flashlight") ||
+      items.find((it) => next.id === "breaker" && it.kind === "breaker") ||
+      items.find((it) => next.id === "generator" && it.kind === "generator") ||
+      items.find((it) => next.id.startsWith("kit-") && it.item === next.id.slice(4)) ||
+      items.find((it) => next.id === "station" && it.kind === "kit-station") ||
+      items.find((it) => (next.id === "find-neighbor" || next.id === "talk-neighbor") && it.kind === "neighbor") ||
+      items.find((it) => next.id.startsWith("find-") && it.memberId === next.id.slice(5)) ||
+      items.find((it) => next.id === "meeting" && it.kind === "rally");
+    return hit ? { x: hit.x, y: hit.y } : null;
+  }
+
+  private updateKara(dt: number) {
+    const near = this.nearby();
+    const obj = this.objectivePoint();
+    let tx = this.px + 22;
+    let ty = this.py - 52;
+    if (this.dialogue && near) {
+      this.karaMode = "teaching";
+      tx = near.x + 16;
+      ty = near.y - 36;
+    } else if (near && !this.dialogue) {
+      this.karaMode = "attention";
+      tx = near.x + 14;
+      ty = near.y - 34;
+    } else if (obj && !this.dialogue) {
+      this.karaMode = "guiding";
+      const dx = obj.x - this.px;
+      const dy = obj.y - this.py;
+      const m = Math.hypot(dx, dy) || 1;
+      tx = this.px + 16 + (dx / m) * 18;
+      ty = this.py - 54 + (dy / m) * 8;
+    } else if (this.complete) {
+      this.karaMode = "success";
+    } else {
+      this.karaMode = "idle";
+    }
+    const rate = this.reduced ? 1 : Math.min(1, dt * 5.2);
+    this.kx += (tx - this.kx) * rate;
+    this.ky += (ty - this.ky) * rate;
+    for (const p of this.karaDust) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 38 * dt;
+      p.life -= dt;
+    }
+    this.karaDust = this.karaDust.filter((p) => p.life > 0);
+  }
+
+  private drawKara(ctx: CanvasRenderingContext2D) {
+    const t = performance.now() / 1000;
+    const teaching = this.karaMode === "teaching" || !!this.dialogue;
+    const bob = this.reduced || teaching ? 0 : Math.sin(t * 2.2) * 2.4;
+    const cx = this.kx;
+    const cy = this.ky + bob;
+    const r = 13;
+    const obj = this.objectivePoint();
+    let spin = this.reduced || teaching ? 0 : Math.sin(t * 0.7) * 0.12;
+    if (obj && !teaching) {
+      spin = Math.atan2(obj.y - cy, obj.x - cx) * 0.12;
+    }
+    const glowA = this.karaMode === "attention" ? 0.7 : this.karaMode === "success" ? 0.75 : 0.4;
+    drawKaraRose(ctx, cx, cy, r, { glow: glowA, spin });
+
+    if (!this.reduced) {
+      if (Math.random() < (teaching ? 0.1 : 0.28)) {
+        this.karaDust.push({
+          x: cx + (Math.random() - 0.5) * 10,
+          y: cy + 5,
+          vx: (Math.random() - 0.5) * 12,
+          vy: 8 + Math.random() * 18,
+          life: 0.6 + Math.random() * 0.55,
+          s: 0.8 + Math.random() * 1.2,
+        });
+      }
+      for (const p of this.karaDust) {
+        ctx.fillStyle = `rgba(255, 230, 160, ${Math.max(0, p.life * 0.9)})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+  }
+
+  private drawNeighbor(ctx: CanvasRenderingContext2D, it: Interactable) {
+    const img = this.images.neighbor;
+    const f = Math.floor(performance.now() / 240) % 4;
+    if (img) this.drawSheet(ctx, img, 2, 2, f % 2, Math.floor(f / 2), it.x - 26, it.y - 58, 52, 64);
+    ctx.fillStyle = "#1b2430";
+    ctx.font = "700 11px Nunito, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(it.label, it.x, it.y + 18);
+    ctx.textAlign = "left";
+  }
+
+  private drawPawn(ctx: CanvasRenderingContext2D, it: Interactable) {
+    ctx.fillStyle = "#3e6b56";
+    ctx.beginPath();
+    ctx.arc(it.x, it.y - 22, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#dce8e1";
+    ctx.beginPath();
+    ctx.arc(it.x, it.y - 22, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#3e6b56";
+    ctx.beginPath();
+    ctx.ellipse(it.x, it.y - 4, 12, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#1b2430";
+    ctx.font = "700 11px Nunito, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(it.label, it.x, it.y + 16);
+    ctx.textAlign = "left";
+  }
+
+  private drawDark(ctx: CanvasRenderingContext2D, cssW: number, cssH: number, z: number) {
+    const pad = Math.max(cssW, cssH) / z + 80;
+    ctx.fillStyle = "rgba(12, 18, 28, 0.38)";
+    ctx.fillRect(this.camX - pad, this.camY - pad, pad * 2, pad * 2);
+    const radius = this.flashlight ? 260 : 170;
+    const g = ctx.createRadialGradient(this.px, this.py - 12, 12, this.px, this.py - 12, radius);
+    g.addColorStop(0, "rgba(255, 214, 150, 0.32)");
+    g.addColorStop(0.35, "rgba(255, 190, 110, 0.12)");
+    g.addColorStop(1, "rgba(255, 190, 110, 0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(this.camX - pad, this.camY - pad, pad * 2, pad * 2);
+  }
+
+  private installProbe() {
+    window.__controlsTest = {
+      getYaw: () => this.yaw,
+      getSpeed: () => Math.hypot(this.vx, this.vy),
+      setKeys: (codes: string[]) => {
+        this.injected = codes;
+        if (codes.length) this.dialogue = null;
+      },
+    };
+  }
+}
+
+declare global {
+  interface Window {
+    __controlsTest?: {
+      getYaw: () => number;
+      getSpeed: () => number;
+      setKeys?: (codes: string[]) => void;
+    };
+    ReadyHouse?: {
+      loadProfile: (p: FamilyProfile) => void;
+      loadCustomerId: (id: string) => boolean;
+    };
+  }
+}

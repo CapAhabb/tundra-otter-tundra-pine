@@ -1,0 +1,245 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #f3eee4;
+  --color-bg-deep: #e7e0d2;
+  --color-surface: #fffaf2;
+  --color-surface-2: #efe8da;
+  --color-fg: #1b2430;
+  --color-muted: #5d6672;
+  --color-subtle: #8a9188;
+  --color-primary: #3e6b56;
+  --color-primary-fg: #f3eee4;
+  --color-primary-soft: #dce8e1;
+  --color-border: #d5cdbe;
+  --color-ink: #1b2430;
+  --color-night: #121820;
+  --color-warn: #b86a3a;
+  --color-warn-fg: #fff6ee;
+  --color-good: #3e6b56;
+
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+
+  --font-display: "Fraunces", "Times New Roman", serif;
+  --font-sans: "Nunito", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.35rem;
+  --text-2xl: 1.85rem;
+  --text-3xl: 2.4rem;
+  --text-4xl: clamp(2.1rem, 4vw, 3.1rem);
+
+  --shadow-soft: 0 18px 40px -24px rgb(27 36 48 / 0.35);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *:not(.title-keep-motion):not(.title-keep-motion *),
+    *:not(.title-keep-motion)::before,
+    *:not(.title-keep-motion)::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+}
+
+.title-clouds {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 34%;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.title-cloud-strip {
+  position: absolute;
+  left: 0;
+  display: flex;
+  width: max-content;
+  animation: title-cloud-drift linear infinite;
+}
+
+.title-cloud-strip svg {
+  display: block;
+  width: 100vw;
+  min-width: 70rem;
+  height: 7.5rem;
+}
+
+@keyframes title-cloud-drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.kara-stage {
+  position: relative;
+  isolation: isolate;
+  min-height: 6.5rem;
+}
+
+.kara-fly {
+  position: absolute;
+  top: 0.4rem;
+  left: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  pointer-events: none;
+  offset-anchor: center;
+}
+
+.kara-fly svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 10px rgba(255, 210, 120, 0.55));
+}
+
+.kara-fly-back {
+  z-index: 0;
+  animation:
+    kara-wander 9s ease-in-out infinite,
+    kara-depth-back 9s ease-in-out infinite;
+}
+
+.kara-fly-front {
+  z-index: 20;
+  animation:
+    kara-wander 9s ease-in-out infinite,
+    kara-depth-front 9s ease-in-out infinite;
+}
+
+.kara-spark {
+  position: absolute;
+  left: 50%;
+  top: 70%;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 236, 180, 0.9);
+  animation: kara-spark-fall 1.6s linear infinite;
+}
+
+.kara-spark:nth-child(2) {
+  animation-delay: 0.4s;
+  left: 35%;
+}
+.kara-spark:nth-child(3) {
+  animation-delay: 0.9s;
+  left: 62%;
+}
+
+@keyframes kara-wander {
+  0% {
+    transform: translate(-8px, 18px) scale(0.92);
+  }
+  16% {
+    transform: translate(72px, -20px) scale(1.06);
+  }
+  32% {
+    transform: translate(200px, 10px) scale(0.94);
+  }
+  48% {
+    transform: translate(340px, -14px) scale(1.1);
+  }
+  64% {
+    transform: translate(220px, 22px) scale(0.9);
+  }
+  80% {
+    transform: translate(70px, -8px) scale(1.04);
+  }
+  100% {
+    transform: translate(-8px, 18px) scale(0.92);
+  }
+}
+
+@keyframes kara-depth-back {
+  0%,
+  38%,
+  100% {
+    opacity: 1;
+  }
+  48%,
+  88% {
+    opacity: 0;
+  }
+}
+
+@keyframes kara-depth-front {
+  0%,
+  38%,
+  100% {
+    opacity: 0;
+  }
+  48%,
+  88% {
+    opacity: 1;
+  }
+}
+
+@keyframes kara-spark-fall {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate(6px, 28px) scale(0.2);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .title-cloud-strip,
+  .kara-fly,
+  .kara-spark {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+  .kara-fly-front {
+    opacity: 0 !important;
+  }
+  .kara-fly-back {
+    transform: translate(120px, 0);
+  }
+}

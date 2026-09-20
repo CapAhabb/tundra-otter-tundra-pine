@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Northstar Guidance",
+      "hasCanvas": false,
+      "bodyTextLen": 201,
+      "bodyTextHash": "d45428396ce3abac4e3199c89ed8b5019b6b0c61afa38f6b72fe0da9cfb93913",
+      "bodyTextPrefix": "Family continuity training Northstar Guidance Event Sim A calm w",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Northstar Guidance",
+      "hasCanvas": false,
+      "bodyTextLen": 201,
+      "bodyTextHash": "d45428396ce3abac4e3199c89ed8b5019b6b0c61afa38f6b72fe0da9cfb93913",
+      "bodyTextPrefix": "Family continuity training Northstar Guidance Event Sim A calm w",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}
