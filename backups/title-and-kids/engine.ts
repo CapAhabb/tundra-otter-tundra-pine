@@ -24,8 +24,8 @@ export type HudState = {
 
 const ASSETS: Record<string, string> = {
   player: "/game/player-sheet.png",
-  maya: "/game/maya.png?v=restore2",
-  leo: "/game/leo.png?v=restore2",
+  maya: "/game/maya-sheet.png?v=3",
+  leo: "/game/leo-sheet.png?v=3",
   neighbor: "/game/neighbor-sheet.png",
   sofa: "/game/sofa.png",
   bed: "/game/bed.png",
@@ -817,15 +817,14 @@ export class ReadyEngine {
   private kidSheet(): HTMLImageElement | undefined {
     const n = this.playerName.toLowerCase();
     if (n.includes("leo") || n.includes("sam") || n.includes("jordan")) return this.images.leo;
-    return this.images.maya;
+    return this.images.maya ?? this.images.player ?? this.images.leo;
   }
 
   private drawPlayer(ctx: CanvasRenderingContext2D) {
     const img = this.kidSheet();
+    const col = this.dir === "down" ? 0 : this.dir === "up" ? 1 : this.dir === "left" ? 2 : 3;
     if (img) {
-      const dw = img.width;
-      const dh = img.height;
-      ctx.drawImage(img, this.px - dw / 2, this.py - dh + 8, dw, dh);
+      this.drawSheet(ctx, img, 4, 1, col, 0, this.px - 28, this.py - 90, 56, 98);
     }
     this.drawKara(ctx);
   }
@@ -937,7 +936,7 @@ export class ReadyEngine {
     const maya = name.includes("maya") || name.includes("sofia");
     const kid = leo ? this.images.leo : maya ? this.images.maya : undefined;
     if (kid) {
-      ctx.drawImage(kid, it.x - kid.width / 2, it.y - kid.height + 8, kid.width, kid.height);
+      this.drawSheet(ctx, kid, 4, 1, 0, 0, it.x - 28, it.y - 90, 56, 98);
     } else {
       ctx.fillStyle = "#3e6b56";
       ctx.beginPath();

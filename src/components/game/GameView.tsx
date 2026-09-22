@@ -4,6 +4,7 @@ import { ReadyEngine, type HudState } from "@/lib/game/engine";
 import { useGameStore } from "@/lib/game/store";
 import { gameAudio } from "@/lib/game/audio";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 export function GameView() {
@@ -99,17 +100,19 @@ export function GameView() {
       {hud ? (
         <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-3 sm:p-4">
           <div className="flex items-start justify-between gap-3">
-            <div className="pointer-events-auto max-w-[min(100%,22rem)] rounded-[var(--radius-lg)] border border-primary-fg/10 bg-night/78 px-3 py-2 text-primary-fg backdrop-blur-sm">
-              <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-primary-fg/70">
-                <MapPin className="size-3.5" />
-                {hud.roomName}
-              </p>
-              <p className="mt-1 text-sm leading-snug">{hud.hint}</p>
-            </div>
+            <Card className="pointer-events-auto ns-placard max-w-[min(100%,22rem)]">
+              <CardContent className="px-3 py-2">
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
+                  <MapPin className="size-3.5" />
+                  {hud.roomName}
+                </p>
+                <p className="mt-1 text-sm leading-snug text-fg">{hud.hint}</p>
+              </CardContent>
+            </Card>
             <div className="pointer-events-auto flex gap-2">
               <Button
                 size="icon"
-                variant="night"
+                variant="secondary"
                 aria-label={speakOn ? "Turn off read-aloud" : "Read to me"}
                 onClick={() => {
                   const next = !speakOn;
@@ -122,7 +125,7 @@ export function GameView() {
               </Button>
               <Button
                 size="icon"
-                variant="night"
+                variant="secondary"
                 aria-label={muted ? "Unmute" : "Mute"}
                 onClick={() => {
                   const next = !muted;
@@ -134,7 +137,7 @@ export function GameView() {
               </Button>
               <Button
                 size="icon"
-                variant="night"
+                variant="secondary"
                 aria-label="Pause"
                 onClick={() => setPaused(true)}
               >
@@ -144,18 +147,18 @@ export function GameView() {
           </div>
 
           <div className="flex items-end justify-between gap-3">
-            <ol className="hidden max-w-xs flex-col gap-1 rounded-[var(--radius-lg)] border border-primary-fg/10 bg-night/70 p-3 text-primary-fg backdrop-blur-sm sm:flex">
+            <ol className="ns-placard hidden max-w-xs flex-col gap-1 rounded-[var(--radius-xl)] border border-border p-3 text-fg shadow-[var(--shadow-soft)] sm:flex">
               {hud.steps.map((s) => (
                 <li key={s.id} className="flex items-center gap-2 text-xs">
                   <span
                     className={cn(
                       "grid size-4 place-items-center rounded-full",
-                      s.done ? "bg-primary text-primary-fg" : "bg-primary-fg/15",
+                      s.done ? "bg-primary text-primary-fg" : "bg-primary-soft text-primary",
                     )}
                   >
                     {s.done ? <Check className="size-3" /> : null}
                   </span>
-                  <span className={s.done ? "text-primary-fg/55 line-through" : ""}>{s.label}</span>
+                  <span className={s.done ? "text-muted line-through" : ""}>{s.label}</span>
                 </li>
               ))}
             </ol>
@@ -193,9 +196,18 @@ export function GameView() {
       ) : null}
 
       {hud?.dialogue ? (
-        <div className="absolute inset-x-3 bottom-3 z-20 rounded-[var(--radius-xl)] border border-border bg-surface p-4 text-left shadow-[var(--shadow-soft)] sm:inset-x-auto sm:left-1/2 sm:w-[min(36rem,calc(100%-2rem))] sm:-translate-x-1/2">
+        <Card className="ns-placard absolute inset-x-3 bottom-3 z-20 overflow-hidden text-left sm:inset-x-auto sm:left-1/2 sm:w-[min(36rem,calc(100%-2rem))] sm:-translate-x-1/2">
+          <svg className="pointer-events-none absolute -right-8 -top-8 size-36 text-[#4a3a22] opacity-[0.12]" viewBox="0 0 400 400" aria-hidden="true">
+            <g fill="none" stroke="currentColor" strokeWidth="1.2">
+              <circle cx="200" cy="200" r="168" />
+              <circle cx="200" cy="200" r="148" />
+              <path d="M200 32 V368 M32 200 H368" />
+            </g>
+            <path fill="currentColor" d="M200 48 L214 186 L200 200 L186 186 Z M200 352 L214 214 L200 200 L186 214 Z M48 200 L186 186 L200 200 L186 214 Z M352 200 L214 186 L200 200 L214 214 Z" />
+          </svg>
+          <CardContent className="relative p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-primary">{hud.dialogue.speaker}</p>
-          <p className="mt-1 text-base leading-relaxed">{hud.dialogue.text}</p>
+          <p className="mt-1 font-display text-lg leading-relaxed text-fg">{hud.dialogue.text}</p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Button
               size="sm"
@@ -212,18 +224,19 @@ export function GameView() {
                   {c.label}
                 </Button>
               ))
-            ) : (
-              <Button size="sm" variant="secondary" onClick={() => engineRef.current?.dismissDialogue()}>
-                Continue
-              </Button>
-            )}
+            ) : null}
+            <Button size="sm" variant="secondary" onClick={() => engineRef.current?.dismissDialogue()}>
+              Continue
+            </Button>
           </div>
-        </div>
+          </CardContent>
+        </Card>
       ) : null}
 
       {paused ? (
         <div className="absolute inset-0 z-30 grid place-items-center bg-night/70 px-4">
-          <div className="w-full max-w-sm rounded-[var(--radius-xl)] border border-border bg-surface p-6">
+          <Card className="ns-placard w-full max-w-sm">
+            <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <h2 className="font-display text-2xl font-semibold">Paused</h2>
               <Button size="icon" variant="ghost" aria-label="Close" onClick={() => setPaused(false)}>
@@ -237,7 +250,8 @@ export function GameView() {
                 Leave drill
               </Button>
             </div>
-          </div>
+            </CardContent>
+          </Card>
         </div>
       ) : null}
     </div>

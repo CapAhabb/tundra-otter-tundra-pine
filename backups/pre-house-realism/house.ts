@@ -355,7 +355,7 @@ export function buildHouse(profile: FamilyProfile, shell?: VisualShell | null): 
     walk,
     props,
     interactables: ints,
-    spawn: { x: liv.x + 560, y: liv.y + 280 },
+    spawn: { x: liv.x + 400, y: liv.y + 250 },
     meeting,
   };
 }

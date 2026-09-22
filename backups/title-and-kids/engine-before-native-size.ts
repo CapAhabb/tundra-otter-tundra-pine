@@ -24,8 +24,8 @@ export type HudState = {
 
 const ASSETS: Record<string, string> = {
   player: "/game/player-sheet.png",
-  maya: "/game/maya.png?v=restore2",
-  leo: "/game/leo.png?v=restore2",
+  maya: "/game/maya.png?v=restore1",
+  leo: "/game/leo.png?v=restore1",
   neighbor: "/game/neighbor-sheet.png",
   sofa: "/game/sofa.png",
   bed: "/game/bed.png",
@@ -817,15 +817,15 @@ export class ReadyEngine {
   private kidSheet(): HTMLImageElement | undefined {
     const n = this.playerName.toLowerCase();
     if (n.includes("leo") || n.includes("sam") || n.includes("jordan")) return this.images.leo;
-    return this.images.maya;
+    return this.images.maya ?? this.images.player ?? this.images.leo;
   }
 
   private drawPlayer(ctx: CanvasRenderingContext2D) {
     const img = this.kidSheet();
     if (img) {
-      const dw = img.width;
-      const dh = img.height;
-      ctx.drawImage(img, this.px - dw / 2, this.py - dh + 8, dw, dh);
+      const dw = 58;
+      const dh = Math.round((dw * img.height) / img.width);
+      ctx.drawImage(img, this.px - dw / 2, this.py - dh + 6, dw, dh);
     }
     this.drawKara(ctx);
   }
@@ -937,7 +937,9 @@ export class ReadyEngine {
     const maya = name.includes("maya") || name.includes("sofia");
     const kid = leo ? this.images.leo : maya ? this.images.maya : undefined;
     if (kid) {
-      ctx.drawImage(kid, it.x - kid.width / 2, it.y - kid.height + 8, kid.width, kid.height);
+      const dw = 58;
+      const dh = Math.round((dw * kid.height) / kid.width);
+      ctx.drawImage(kid, it.x - dw / 2, it.y - dh + 6, dw, dh);
     } else {
       ctx.fillStyle = "#3e6b56";
       ctx.beginPath();

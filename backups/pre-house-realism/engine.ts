@@ -24,8 +24,6 @@ export type HudState = {
 
 const ASSETS: Record<string, string> = {
   player: "/game/player-sheet.png",
-  maya: "/game/maya.png?v=restore2",
-  leo: "/game/leo.png?v=restore2",
   neighbor: "/game/neighbor-sheet.png",
   sofa: "/game/sofa.png",
   bed: "/game/bed.png",
@@ -145,8 +143,8 @@ export class ReadyEngine {
     this.world = buildHouse(profile, shell);
     this.px = this.world.spawn.x;
     this.py = this.world.spawn.y;
-    this.kx = this.px + 56;
-    this.ky = this.py - 138;
+    this.kx = this.px + 22;
+    this.ky = this.py - 52;
     this.camX = this.px;
     this.camY = this.py;
     this.playerName = profile.members.find((m) => m.id === playerId)?.name ?? "You";
@@ -182,7 +180,10 @@ export class ReadyEngine {
         : "Let's practice walking to your neighbor.";
     }
     this.talkQueue = [
-      { speaker: "Kara", text: `Hi ${this.playerName}, I’m Kara. ${drillLine}` },
+      { speaker: "Kara", text: "Welcome to Event Sim. Hi, I’m Kara Wari. You can call me Kara. I’m your guide." },
+      { speaker: "Kara", text: "My name comes from Karariwari, a Pawnee name for the North Star — “the one who does not move.”" },
+      { speaker: "Kara", text: "Like the North Star, I’m here to help you keep your bearings while things around you change. Look for my compass if you need help." },
+      { speaker: "Kara", text: drillLine },
     ];
     this.advanceTalk();
     this.emit();
@@ -257,28 +258,23 @@ export class ReadyEngine {
   }
 
   dismissDialogue() {
-    this.pendingChoices = null;
-    this.scheduledChoices = null;
+    if (this.pendingChoices) return;
     this.advanceTalk();
     this.emit();
   }
 
   chooseLesson(id: string) {
+    if (!this.pendingChoices) return;
     this.pendingChoices = null;
-    this.scheduledChoices = null;
-    this.dialogue = null;
     if (id === "flash-ok") {
       saveChildObservation("flashlight", "Child marked flashlight as checked.");
       this.karaSay("Nice job. Now you know it’s ready.");
     } else if (id === "flash-batteries") {
       saveChildObservation("flashlight", "Child noted the flashlight may need batteries.");
       this.karaSay("Good catch. That’s exactly why we check before an emergency.");
-    } else if (id === "water-yes") {
-      saveChildObservation("water", "Child knows extra water location.");
-      this.karaSay("Good. Still get with your parents and talk it through, so you both know for sure.");
-    } else if (id === "water-not-sure") {
-      saveChildObservation("water", "Child is unsure where extra water is.");
-      this.karaSay("That’s okay. Get with your parents and discuss where extra water is kept, so you’ll know if you ever need it.");
+    } else if (id === "water-yes" || id === "water-not-sure") {
+      saveChildObservation("water", id === "water-yes" ? "Child knows extra water location." : "Child is unsure where extra water is.");
+      this.karaSay(id === "water-yes" ? "Good. Remember that spot." : "Ask a grown-up later. For now, you found the water.");
     }
     this.karaMode = "success";
     this.emit();
@@ -319,10 +315,8 @@ export class ReadyEngine {
   };
 
   private step(dt: number) {
-    let dismissed = false;
     if (this.dialogue && this.interactHeld && !this.interactWas && !this.pendingChoices) {
       this.advanceTalk();
-      dismissed = true;
     }
 
     let mx = this.stick.x;
@@ -372,7 +366,7 @@ export class ReadyEngine {
     this.interactWas = this.interactHeld;
     if (!this.held("KeyE") && !this.held("Space")) this.interactHeld = false;
 
-    if (just && !this.dialogue && !dismissed) this.tryInteract();
+    if (just && !this.dialogue) this.tryInteract();
 
     if (this.idle > 14 && !this.complete && !this.dialogue) {
       this.idle = 0;
@@ -440,6 +434,17 @@ export class ReadyEngine {
         this.startFlashlightLesson(this.drill === "power-out");
       } else if (n.item === "water") {
         this.startWaterLesson();
+      } else if (n.item === "food") {
+        this.karaSay("You found extra food. Keep some that does not need a fridge.");
+      } else if (n.item === "radio") {
+        this.karaSay("A radio can help you hear news if phones stop working.");
+      } else if (n.item === "medkit") {
+        this.karaSay("You found the first-aid kit. Grown-ups handle medicine. You just need to know where it lives.");
+      } else {
+        this.dialogue = {
+          speaker: "Kara",
+          text: `You found the ${KIT_LABELS[n.item].toLowerCase()}. ${this.collected.size} of ${this.profile.plan.kitItems.length} kit items.`,
+        };
       }
       this.maybeFinish();
       return;
@@ -624,7 +629,9 @@ export class ReadyEngine {
     }
     this.taught.add("water");
     this.talkQueue = [
-      { speaker: "Kara", text: "You found the water. Do you know where your family keeps extra?" },
+      { speaker: "Kara", text: "You found the water supply." },
+      { speaker: "Kara", text: "In an emergency, clean water becomes really important." },
+      { speaker: "Kara", text: "Do you know where your family keeps extra water?" },
     ];
     this.scheduledChoices = [
       { id: "water-yes", label: "Yes" },
@@ -654,7 +661,7 @@ export class ReadyEngine {
       prompt: n ? n.label : null,
       playerName: this.playerName,
     };
-    const key = `${hud.roomName}|${n?.id ?? ""}|${hud.hint}|${hud.dialogue?.text ?? ""}|${(hud.choices ?? []).map((c) => c.id).join(",")}|${this.steps.map((s) => (s.done ? 1 : 0)).join("")}|${hud.prompt ?? ""}`;
+    const key = `${hud.roomName}|${n?.id ?? ""}|${hud.hint}|${hud.dialogue?.text ?? ""}|${this.steps.map((s) => (s.done ? 1 : 0)).join("")}|${hud.prompt ?? ""}`;
     if (key === this.hudKey) return;
     this.hudKey = key;
     this.onHud?.(hud);
@@ -662,7 +669,7 @@ export class ReadyEngine {
 
   private zoom() {
     const cssW = this.canvas.clientWidth;
-    return cssW < 500 ? 0.5 : 0.55;
+    return cssW < 500 ? 1.05 : 1.18;
   }
 
   private draw() {
@@ -670,7 +677,7 @@ export class ReadyEngine {
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = "#2a3a2c";
+    ctx.fillStyle = "#121820";
     ctx.fillRect(0, 0, w, h);
 
     const z = this.zoom();
@@ -691,15 +698,13 @@ export class ReadyEngine {
       if (it.kind === "neighbor") {
         drawables.push({ y: it.y + 20, draw: () => this.drawNeighbor(ctx, it) });
       }
-    }
-    drawables.sort((a, b) => a.y - b.y);
-    for (const d of drawables) d.draw();
-    for (const it of this.world.interactables) {
       if (it.kind === "family" && it.memberId !== this.playerId && !this.checked.has(it.memberId ?? "")) {
-        this.drawPawn(ctx, it);
+        drawables.push({ y: it.y + 16, draw: () => this.drawPawn(ctx, it) });
       }
     }
-    this.drawPlayer(ctx);
+    drawables.push({ y: this.py + 18, draw: () => this.drawPlayer(ctx) });
+    drawables.sort((a, b) => a.y - b.y);
+    for (const d of drawables) d.draw();
 
     for (const p of this.particles) {
       ctx.globalAlpha = Math.max(0, p.life * 2);
@@ -716,62 +721,33 @@ export class ReadyEngine {
   }
 
   private drawRooms(ctx: CanvasRenderingContext2D) {
-    const ground = this.images.grass ?? this.images.forest ?? this.images.wood;
-    if (ground) {
-      const tw = 220;
-      for (let x = -40; x < this.world.width + 40; x += tw) {
-        for (let y = -40; y < this.world.height + 40; y += tw) {
-          ctx.drawImage(ground, x, y, tw, tw);
-        }
-      }
-    } else {
-      ctx.fillStyle = "#3d5a40";
-      ctx.fillRect(-40, -40, this.world.width + 80, this.world.height + 80);
-    }
-
     for (const room of this.world.rooms) {
-      const outdoor = room.id === "yard";
       const img = this.images[room.floor];
       ctx.save();
       ctx.beginPath();
       ctx.rect(room.x, room.y, room.w, room.h);
       ctx.clip();
       if (img) {
-        const tw = 160;
+        const tw = 180;
         for (let x = room.x; x < room.x + room.w; x += tw) {
           for (let y = room.y; y < room.y + room.h; y += tw) {
             ctx.drawImage(img, x, y, tw, tw);
           }
         }
       } else {
-        ctx.fillStyle = outdoor ? "#6a8a58" : "#e6d9c4";
-        ctx.fillRect(room.x, room.y, room.w, room.h);
-      }
-      if (!outdoor) {
-        const g = ctx.createRadialGradient(
-          room.x + room.w * 0.5,
-          room.y + room.h * 0.35,
-          20,
-          room.x + room.w * 0.5,
-          room.y + room.h * 0.5,
-          Math.max(room.w, room.h) * 0.72,
-        );
-        g.addColorStop(0, "rgba(255, 236, 210, 0.16)");
-        g.addColorStop(1, "rgba(40, 28, 18, 0.18)");
-        ctx.fillStyle = g;
+        ctx.fillStyle = "#d9d0c0";
         ctx.fillRect(room.x, room.y, room.w, room.h);
       }
       ctx.restore();
 
-      ctx.lineJoin = "round";
-      ctx.strokeStyle = "#6a5340";
-      ctx.lineWidth = 16;
-      ctx.strokeRect(room.x + 8, room.y + 8, room.w - 16, room.h - 16);
-      ctx.strokeStyle = "#c4b49a";
-      ctx.lineWidth = 6;
-      ctx.strokeRect(room.x + 11, room.y + 11, room.w - 22, room.h - 22);
+      ctx.strokeStyle = "#1b2430";
+      ctx.lineWidth = 8;
+      ctx.strokeRect(room.x + 4, room.y + 4, room.w - 8, room.h - 8);
+      ctx.strokeStyle = "#5f7d6d";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(room.x + 10, room.y + 10, room.w - 20, room.h - 20);
 
-      ctx.fillStyle = outdoor ? "rgba(245, 240, 230, 0.72)" : "rgba(255, 248, 236, 0.78)";
+      ctx.fillStyle = "rgba(27,36,48,0.38)";
       ctx.font = "600 13px Nunito, sans-serif";
       ctx.fillText(room.name, room.x + 22, room.y + 32);
     }
@@ -784,10 +760,6 @@ export class ReadyEngine {
   }
 
   private drawProp(ctx: CanvasRenderingContext2D, p: { kind: string; x: number; y: number; w: number; h: number }) {
-    ctx.fillStyle = "rgba(30, 24, 16, 0.22)";
-    ctx.beginPath();
-    ctx.ellipse(p.x + p.w / 2, p.y + p.h - 4, p.w * 0.42, 8, 0, 0, Math.PI * 2);
-    ctx.fill();
     const img = this.images[p.kind];
     if (img) {
       ctx.drawImage(img, p.x, p.y, p.w, p.h);
@@ -814,18 +786,25 @@ export class ReadyEngine {
     ctx.drawImage(img, col * cw, row * ch, cw, ch, x, y, dw, dh);
   }
 
-  private kidSheet(): HTMLImageElement | undefined {
-    const n = this.playerName.toLowerCase();
-    if (n.includes("leo") || n.includes("sam") || n.includes("jordan")) return this.images.leo;
-    return this.images.maya;
-  }
-
   private drawPlayer(ctx: CanvasRenderingContext2D) {
-    const img = this.kidSheet();
+    const img = this.images.player;
+    const moving = Math.hypot(this.vx, this.vy) > 8;
+    const bob = moving && !this.reduced ? Math.sin(this.walkT * 2.4) * 3 : 0;
+    const dw = 46;
+    const dh = 58;
+    const x = this.px - dw / 2;
+    const y = this.py - dh + 10 + bob;
     if (img) {
-      const dw = img.width;
-      const dh = img.height;
-      ctx.drawImage(img, this.px - dw / 2, this.py - dh + 8, dw, dh);
+      ctx.drawImage(img, x, y, dw, dh);
+    } else {
+      ctx.fillStyle = "#3e6b56";
+      ctx.beginPath();
+      ctx.ellipse(this.px, this.py - 18, 12, 22, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(this.px, this.py - 40, 9, 0, Math.PI * 2);
+      ctx.fillStyle = "#e8c9a0";
+      ctx.fill();
     }
     this.drawKara(ctx);
   }
@@ -849,19 +828,23 @@ export class ReadyEngine {
   private updateKara(dt: number) {
     const near = this.nearby();
     const obj = this.objectivePoint();
-    let tx = this.px + 56;
-    let ty = this.py - 138;
-    if (near) {
-      this.karaMode = this.dialogue ? "teaching" : "attention";
-      tx = this.px + 8;
-      ty = this.py - 102;
+    let tx = this.px + 22;
+    let ty = this.py - 52;
+    if (this.dialogue && near) {
+      this.karaMode = "teaching";
+      tx = near.x + 16;
+      ty = near.y - 36;
+    } else if (near && !this.dialogue) {
+      this.karaMode = "attention";
+      tx = near.x + 14;
+      ty = near.y - 34;
     } else if (obj && !this.dialogue) {
       this.karaMode = "guiding";
       const dx = obj.x - this.px;
       const dy = obj.y - this.py;
       const m = Math.hypot(dx, dy) || 1;
-      tx = this.px + 22 + (dx / m) * 22;
-      ty = this.py - 130 + (dy / m) * 6;
+      tx = this.px + 16 + (dx / m) * 18;
+      ty = this.py - 54 + (dy / m) * 8;
     } else if (this.complete) {
       this.karaMode = "success";
     } else {
@@ -869,8 +852,8 @@ export class ReadyEngine {
     }
     if (this.karaMode === "idle" && !this.reduced) {
       const t = performance.now() / 1000;
-      tx += Math.sin(t * 1.15) * 10;
-      ty += Math.cos(t * 0.9) * 6;
+      tx += Math.sin(t * 1.15) * 14;
+      ty += Math.cos(t * 0.9) * 8;
     }
     const rate = this.reduced ? 1 : Math.min(1, dt * 5.2);
     this.kx += (tx - this.kx) * rate;
@@ -890,27 +873,28 @@ export class ReadyEngine {
     const bob = this.reduced || teaching ? 0 : Math.sin(t * 2.2) * 4;
     const cx = this.kx;
     const cy = this.ky + bob;
-    const r = 8;
+    const r = 13;
     const obj = this.objectivePoint();
     let spin = this.reduced || teaching ? 0 : Math.sin(t * 0.7) * 0.12;
     if (obj && !teaching) {
       spin = Math.atan2(obj.y - cy, obj.x - cx) * 0.12;
     }
-    drawKaraRose(ctx, cx, cy, 9, { glow: 1, spin });
+    const glowA = this.karaMode === "attention" ? 0.7 : this.karaMode === "success" ? 0.75 : 0.4;
+    drawKaraRose(ctx, cx, cy, r, { glow: glowA, spin });
 
     if (!this.reduced) {
-      if (Math.random() < 0.9) {
+      if (Math.random() < (teaching ? 0.1 : 0.28)) {
         this.karaDust.push({
-          x: cx + (Math.random() - 0.5) * 16,
+          x: cx + (Math.random() - 0.5) * 10,
           y: cy + 5,
-          vx: (Math.random() - 0.5) * 20,
-          vy: 16 + Math.random() * 28,
-          life: 0.9 + Math.random() * 0.8,
-          s: 0.7 + Math.random() * 2,
+          vx: (Math.random() - 0.5) * 12,
+          vy: 8 + Math.random() * 18,
+          life: 0.6 + Math.random() * 0.55,
+          s: 0.8 + Math.random() * 1.2,
         });
       }
       for (const p of this.karaDust) {
-        ctx.fillStyle = `rgba(255, 236, 170, ${Math.max(0, p.life)})`;
+        ctx.fillStyle = `rgba(255, 230, 160, ${Math.max(0, p.life * 0.9)})`;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.s, 0, Math.PI * 2);
         ctx.fill();
@@ -932,26 +916,18 @@ export class ReadyEngine {
   }
 
   private drawPawn(ctx: CanvasRenderingContext2D, it: Interactable) {
-    const name = (it.label ?? "").toLowerCase();
-    const leo = name.includes("leo") || name.includes("sam") || name.includes("jordan");
-    const maya = name.includes("maya") || name.includes("sofia");
-    const kid = leo ? this.images.leo : maya ? this.images.maya : undefined;
-    if (kid) {
-      ctx.drawImage(kid, it.x - kid.width / 2, it.y - kid.height + 8, kid.width, kid.height);
-    } else {
-      ctx.fillStyle = "#3e6b56";
-      ctx.beginPath();
-      ctx.arc(it.x, it.y - 22, 11, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#dce8e1";
-      ctx.beginPath();
-      ctx.arc(it.x, it.y - 22, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#3e6b56";
-      ctx.beginPath();
-      ctx.ellipse(it.x, it.y - 4, 12, 14, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    ctx.fillStyle = "#3e6b56";
+    ctx.beginPath();
+    ctx.arc(it.x, it.y - 22, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#dce8e1";
+    ctx.beginPath();
+    ctx.arc(it.x, it.y - 22, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#3e6b56";
+    ctx.beginPath();
+    ctx.ellipse(it.x, it.y - 4, 12, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = "#1b2430";
     ctx.font = "700 11px Nunito, sans-serif";
     ctx.textAlign = "center";
