@@ -147,7 +147,7 @@ export function GameView() {
           </div>
 
           <div className="flex items-end justify-between gap-3">
-            <ol className="ns-placard hidden max-w-xs flex-col gap-1 rounded-[var(--radius-xl)] border border-border p-3 text-fg shadow-[var(--shadow-soft)] sm:flex">
+            <ol className="ns-placard flex max-w-[9.5rem] flex-col gap-1 rounded-[var(--radius-xl)] border border-border p-2 text-fg shadow-[var(--shadow-soft)] sm:max-w-xs sm:p-3">
               {hud.steps.map((s) => (
                 <li key={s.id} className="flex items-center gap-2 text-xs">
                   <span
@@ -225,8 +225,19 @@ export function GameView() {
                 </Button>
               ))
             ) : null}
-            <Button size="sm" variant="secondary" onClick={() => engineRef.current?.dismissDialogue()}>
+            <Button
+              size="sm"
+              className="border border-transparent bg-[#2f8f4e] text-white hover:bg-[#278044]"
+              onClick={() => engineRef.current?.dismissDialogue()}
+            >
               Continue
+            </Button>
+            <Button
+              size="sm"
+              className="border border-transparent bg-[#b3432f] text-white hover:bg-[#9c3a28]"
+              onClick={() => engineRef.current?.dismissDialogue()}
+            >
+              Cancel
             </Button>
           </div>
           </CardContent>

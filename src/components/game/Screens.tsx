@@ -157,7 +157,7 @@ export function TitleScreen() {
       <img
         src="/game/title-dusk.jpg"
         alt=""
-        className="absolute left-1/2 top-[46%] h-[78%] w-[78%] max-w-none -translate-x-1/2 -translate-y-1/2 object-contain"
+        className="absolute inset-x-0 top-0 h-[54%] w-full object-cover object-[58%_38%] sm:inset-0 sm:h-full sm:object-[62%_45%]"
       />
       <div className="absolute inset-0 bg-[linear-gradient(90deg,rgb(18_24_32/0.88)_0%,rgb(18_24_32/0.55)_48%,rgb(18_24_32/0.2)_100%)]" />
       <div className="relative z-10 mx-auto flex min-h-dvh w-full max-w-6xl flex-col justify-end gap-8 px-5 py-8 sm:justify-center sm:py-16">
