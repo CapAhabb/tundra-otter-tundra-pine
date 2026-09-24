@@ -100,15 +100,19 @@ export function GameView() {
       {hud ? (
         <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-3 sm:p-4">
           <div className="flex items-start justify-between gap-3">
-            <Card className="pointer-events-auto ns-placard max-w-[min(100%,22rem)]">
-              <CardContent className="px-3 py-2">
-                <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
-                  <MapPin className="size-3.5" />
-                  {hud.roomName}
-                </p>
-                <p className="mt-1 text-sm leading-snug text-fg">{hud.hint}</p>
-              </CardContent>
-            </Card>
+            {!hud.cutIn ? (
+              <Card className="pointer-events-auto ns-placard max-w-[min(100%,22rem)]">
+                <CardContent className="px-3 py-2">
+                  <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
+                    <MapPin className="size-3.5" />
+                    {hud.roomName}
+                  </p>
+                  <p className="mt-1 text-sm leading-snug text-fg">{hud.hint}</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <span />
+            )}
             <div className="pointer-events-auto flex gap-2">
               <Button
                 size="icon"
@@ -146,49 +150,51 @@ export function GameView() {
             </div>
           </div>
 
-          <div className="flex items-end justify-between gap-3">
-            <ol className="ns-placard flex max-w-[9.5rem] flex-col gap-1 rounded-[var(--radius-xl)] border border-border p-2 text-fg shadow-[var(--shadow-soft)] sm:max-w-xs sm:p-3">
-              {hud.steps.map((s) => (
-                <li key={s.id} className="flex items-center gap-2 text-xs">
-                  <span
-                    className={cn(
-                      "grid size-4 place-items-center rounded-full",
-                      s.done ? "bg-primary text-primary-fg" : "bg-primary-soft text-primary",
-                    )}
-                  >
-                    {s.done ? <Check className="size-3" /> : null}
-                  </span>
-                  <span className={s.done ? "text-muted line-through" : ""}>{s.label}</span>
-                </li>
-              ))}
-            </ol>
-            <div className="flex flex-1 items-end justify-between sm:flex-none sm:justify-end">
-              <div
-                className="pointer-events-auto relative size-28 rounded-full border border-primary-fg/15 bg-night/50 sm:hidden"
-                style={{ touchAction: "none" }}
-                onPointerDown={onStickStart}
-                onPointerMove={moveStick}
-                onPointerUp={endStick}
-                onPointerCancel={endStick}
-                onLostPointerCapture={endStick}
-                onPointerLeave={endStick}
-              />
-              <button
-                type="button"
-                className="pointer-events-auto grid size-16 place-items-center rounded-full bg-primary text-sm font-bold text-primary-fg shadow-[var(--shadow-soft)] sm:hidden"
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  engineRef.current?.requestInteract();
-                }}
-              >
-                Use
-              </button>
+          {!hud.cutIn ? (
+            <div className="flex items-end justify-between gap-3">
+              <ol className="ns-placard flex max-w-[9.5rem] flex-col gap-1 rounded-[var(--radius-xl)] border border-border p-2 text-fg shadow-[var(--shadow-soft)] sm:max-w-xs sm:p-3">
+                {hud.steps.map((s) => (
+                  <li key={s.id} className="flex items-center gap-2 text-xs">
+                    <span
+                      className={cn(
+                        "grid size-4 place-items-center rounded-full",
+                        s.done ? "bg-primary text-primary-fg" : "bg-primary-soft text-primary",
+                      )}
+                    >
+                      {s.done ? <Check className="size-3" /> : null}
+                    </span>
+                    <span className={s.done ? "text-muted line-through" : ""}>{s.label}</span>
+                  </li>
+                ))}
+              </ol>
+              <div className="flex flex-1 items-end justify-between sm:flex-none sm:justify-end">
+                <div
+                  className="pointer-events-auto relative size-28 rounded-full border border-primary-fg/15 bg-night/50 sm:hidden"
+                  style={{ touchAction: "none" }}
+                  onPointerDown={onStickStart}
+                  onPointerMove={moveStick}
+                  onPointerUp={endStick}
+                  onPointerCancel={endStick}
+                  onLostPointerCapture={endStick}
+                  onPointerLeave={endStick}
+                />
+                <button
+                  type="button"
+                  className="pointer-events-auto grid size-16 place-items-center rounded-full bg-primary text-sm font-bold text-primary-fg shadow-[var(--shadow-soft)] sm:hidden"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    engineRef.current?.requestInteract();
+                  }}
+                >
+                  Use
+                </button>
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
       ) : null}
 
-      {hud?.prompt ? (
+      {hud?.prompt && !hud.cutIn ? (
         <div className="pointer-events-none absolute bottom-28 left-1/2 hidden -translate-x-1/2 rounded-full bg-surface px-4 py-2 text-sm font-semibold text-fg sm:block">
           {hud.prompt}
           <span className="ml-2 text-muted">E / Space</span>
@@ -196,8 +202,12 @@ export function GameView() {
       ) : null}
 
       {hud?.dialogue ? (
-        <Card className="ns-placard absolute inset-x-3 bottom-3 z-20 overflow-hidden text-left sm:inset-x-auto sm:left-1/2 sm:w-[min(36rem,calc(100%-2rem))] sm:-translate-x-1/2">
-          <svg className="pointer-events-none absolute -right-8 -top-8 size-36 text-[#4a3a22] opacity-[0.12]" viewBox="0 0 400 400" aria-hidden="true">
+        <Card className="ns-placard absolute inset-x-3 bottom-3 z-20 overflow-hidden text-left sm:inset-x-auto sm:left-1/2 sm:w-[min(34rem,calc(100%-2rem))] sm:-translate-x-1/2">
+          <svg
+            className="pointer-events-none absolute right-3 top-3 size-16 text-[#6a5340] opacity-[0.16]"
+            viewBox="0 0 400 400"
+            aria-hidden="true"
+          >
             <g fill="none" stroke="currentColor" strokeWidth="1.2">
               <circle cx="200" cy="200" r="168" />
               <circle cx="200" cy="200" r="148" />
@@ -206,40 +216,35 @@ export function GameView() {
             <path fill="currentColor" d="M200 48 L214 186 L200 200 L186 186 Z M200 352 L214 214 L200 200 L186 214 Z M48 200 L186 186 L200 200 L186 214 Z M352 200 L214 186 L200 200 L214 214 Z" />
           </svg>
           <CardContent className="relative p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-primary">{hud.dialogue.speaker}</p>
-          <p className="mt-1 font-display text-lg leading-relaxed text-fg">{hud.dialogue.text}</p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-label="Replay"
-              onClick={() => gameAudio.speak(hud.dialogue!.text)}
-            >
-              <RotateCcw className="size-3.5" />
-              Replay
-            </Button>
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary">{hud.dialogue.speaker}</p>
+            <p className="mt-1.5 font-display text-lg leading-relaxed text-fg">{hud.dialogue.text}</p>
             {hud.choices?.length ? (
-              hud.choices.map((c) => (
-                <Button key={c.id} size="sm" onClick={() => engineRef.current?.chooseLesson(c.id)}>
-                  {c.label}
-                </Button>
-              ))
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {hud.choices.map((c) => (
+                  <Button key={c.id} size="sm" onClick={() => engineRef.current?.chooseLesson(c.id)}>
+                    {c.label}
+                  </Button>
+                ))}
+              </div>
             ) : null}
-            <Button
-              size="sm"
-              className="border border-transparent bg-[#2f8f4e] text-white hover:bg-[#278044]"
-              onClick={() => engineRef.current?.dismissDialogue()}
-            >
-              Continue
-            </Button>
-            <Button
-              size="sm"
-              className="border border-transparent bg-[#b3432f] text-white hover:bg-[#9c3a28]"
-              onClick={() => engineRef.current?.dismissDialogue()}
-            >
-              Cancel
-            </Button>
-          </div>
+            <div className="mt-3 flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label="Replay"
+                onClick={() => gameAudio.speak(hud.dialogue!.text)}
+              >
+                <RotateCcw className="size-3.5" />
+                Replay
+              </Button>
+              <Button
+                size="sm"
+                className="border border-transparent bg-[#2f8f4e] text-white hover:bg-[#278044]"
+                onClick={() => engineRef.current?.dismissDialogue()}
+              >
+                Continue
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : null}

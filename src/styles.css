@@ -111,11 +111,21 @@
 .ns-dialog {
   position: relative;
   overflow: hidden;
-  background: rgba(255, 250, 241, 0.96);
+  background: #fdf6e8;
   color: #162823;
-  border: 1px solid rgba(18, 52, 47, 0.14);
+  border: 1px solid rgba(106, 83, 64, 0.32);
   border-radius: 16px;
-  box-shadow: 0 12px 30px rgba(23, 48, 42, 0.12);
+  box-shadow: 0 10px 26px rgba(74, 54, 30, 0.18);
+}
+
+/* This file's rules sit outside Tailwind's layers, so they otherwise beat
+   Tailwind's own `.absolute` utility on the same element regardless of class
+   order — silently turning "absolute" cards (like Kara's dialogue placard)
+   into normal-flow "relative" ones and pushing them off-screen. Restore
+   `absolute` wherever a card explicitly asks for it. */
+.ns-placard.absolute,
+.ns-dialog.absolute {
+  position: absolute;
 }
 
 .ns-dialog-active {
