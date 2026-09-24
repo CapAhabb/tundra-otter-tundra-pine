@@ -1,5 +1,5 @@
 import { buildHouse, circleHitsRect, pointInRect, roomAt } from "./house";
-import { stepsFor } from "./missions";
+import { ageTierFor, kitItemsForTier, stepsFor, tierText, type AgeTier } from "./missions";
 import { gameAudio } from "./audio";
 import { KIT_LABELS, type DrillId, type FamilyProfile, type HouseWorld, type Interactable, type KitItemId, type MissionStep, type Rect, type VisualShell } from "./types";
 import { saveChildObservation } from "./child-progress";
@@ -20,12 +20,13 @@ export type HudState = {
   hint: string;
   prompt: string | null;
   playerName: string;
+  cutIn: boolean;
 };
 
 const ASSETS: Record<string, string> = {
   player: "/game/player-sheet.png",
-  maya: "/game/maya.png?v=restore2",
-  leo: "/game/leo.png?v=restore2",
+  maya: "/game/maya.png",
+  leo: "/game/leo.png",
   neighbor: "/game/neighbor-sheet.png",
   sofa: "/game/sofa.png",
   bed: "/game/bed.png",
@@ -127,6 +128,11 @@ export class ReadyEngine {
   private ky = 0;
   private karaDust: { x: number; y: number; vx: number; vy: number; life: number; s: number }[] = [];
   private hudKey = "";
+  private ageTier: AgeTier = "mid";
+  private effectiveKitItems: KitItemId[] = [];
+  private nudgeCount = 0;
+  cutIn: { x: number; y: number } | null = null;
+  private cutInT = 0;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -149,8 +155,11 @@ export class ReadyEngine {
     this.ky = this.py - 138;
     this.camX = this.px;
     this.camY = this.py;
-    this.playerName = profile.members.find((m) => m.id === playerId)?.name ?? "You";
-    this.steps = stepsFor(drill, profile, this.playerName);
+    const player = profile.members.find((m) => m.id === playerId);
+    this.playerName = player?.name ?? "You";
+    this.ageTier = ageTierFor(player?.age);
+    this.effectiveKitItems = kitItemsForTier(profile.plan.kitItems, this.ageTier);
+    this.steps = stepsFor(drill, profile, this.playerName, player?.age);
     this.reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     if (drill === "power-out") this.powerOut = true;
   }
@@ -257,8 +266,13 @@ export class ReadyEngine {
   }
 
   dismissDialogue() {
+    // Only clear pendingChoices (skipping an already-revealed choice without
+    // answering). Do NOT clear scheduledChoices here: for any lesson with
+    // more than one line of dialogue before its question, clicking Continue
+    // through the earlier lines was wiping the choice before it ever had a
+    // chance to appear. advanceTalk() is what promotes scheduledChoices to
+    // pendingChoices once the queue actually empties.
     this.pendingChoices = null;
-    this.scheduledChoices = null;
     this.advanceTalk();
     this.emit();
   }
@@ -267,18 +281,47 @@ export class ReadyEngine {
     this.pendingChoices = null;
     this.scheduledChoices = null;
     this.dialogue = null;
+    if (id === "flash-ok" || id === "flash-batteries") this.cutIn = null;
     if (id === "flash-ok") {
       saveChildObservation("flashlight", "Child marked flashlight as checked.");
-      this.karaSay("Nice job. Now you know it’s ready.");
+      this.karaSay(
+        tierText(
+          this.ageTier,
+          "Nice! It's ready to go, just like that.",
+          "Nice job. Now you know it’s ready, and so does your family.",
+          "Nice job — you checked it yourself, so your family can count on it working.",
+        ),
+      );
     } else if (id === "flash-batteries") {
       saveChildObservation("flashlight", "Child noted the flashlight may need batteries.");
-      this.karaSay("Good catch. That’s exactly why we check before an emergency.");
+      this.karaSay(
+        tierText(
+          this.ageTier,
+          "Good eye! Tell a grown-up it needs batteries.",
+          "Good catch. That’s exactly why we check before an emergency, not during one.",
+          "Good catch — finding that now, calmly, beats discovering it during an outage.",
+        ),
+      );
     } else if (id === "water-yes") {
       saveChildObservation("water", "Child knows extra water location.");
-      this.karaSay("Good. Still get with your parents and talk it through, so you both know for sure.");
+      this.karaSay(
+        tierText(
+          this.ageTier,
+          "Good! You know right where it is.",
+          "Good. Still get with your parents and talk it through, so you both know for sure.",
+          "Good — it's still worth double-checking with your parents, so you're both certain.",
+        ),
+      );
     } else if (id === "water-not-sure") {
       saveChildObservation("water", "Child is unsure where extra water is.");
-      this.karaSay("That’s okay. Get with your parents and discuss where extra water is kept, so you’ll know if you ever need it.");
+      this.karaSay(
+        tierText(
+          this.ageTier,
+          "That's okay. Ask a grown-up to show you.",
+          "That’s okay. Get with your parents and discuss where extra water is kept, so you’ll know if you ever need it.",
+          "That’s a completely fair answer — ask your parents to walk you through it once, and you'll always know.",
+        ),
+      );
     }
     this.karaMode = "success";
     this.emit();
@@ -325,12 +368,14 @@ export class ReadyEngine {
       dismissed = true;
     }
 
-    let mx = this.stick.x;
-    let my = this.stick.y;
-    if (this.held("KeyA") || this.held("ArrowLeft")) mx -= 1;
-    if (this.held("KeyD") || this.held("ArrowRight")) mx += 1;
-    if (this.held("KeyW") || this.held("ArrowUp")) my -= 1;
-    if (this.held("KeyS") || this.held("ArrowDown")) my += 1;
+    let mx = this.cutIn ? 0 : this.stick.x;
+    let my = this.cutIn ? 0 : this.stick.y;
+    if (!this.cutIn) {
+      if (this.held("KeyA") || this.held("ArrowLeft")) mx -= 1;
+      if (this.held("KeyD") || this.held("ArrowRight")) mx += 1;
+      if (this.held("KeyW") || this.held("ArrowUp")) my -= 1;
+      if (this.held("KeyS") || this.held("ArrowDown")) my += 1;
+    }
     const mag = Math.hypot(mx, my);
     if (mag > 1) {
       mx /= mag;
@@ -358,6 +403,10 @@ export class ReadyEngine {
     const follow = this.reduced ? 1 : 1 - Math.pow(0.001, dt);
     this.camX += (this.px - this.camX) * follow;
     this.camY += (this.py - this.camY) * follow;
+    const cutRate = this.reduced ? 4 : 1.7;
+    this.cutInT = this.cutIn
+      ? Math.min(1, this.cutInT + dt * cutRate)
+      : Math.max(0, this.cutInT - dt * 2.4);
     this.updateKara(dt);
     this.shake = Math.max(0, this.shake - dt * 18);
 
@@ -374,11 +423,12 @@ export class ReadyEngine {
 
     if (just && !this.dialogue && !dismissed) this.tryInteract();
 
-    if (this.idle > 14 && !this.complete && !this.dialogue) {
+    if (this.idle > 14 && !this.complete && !this.dialogue && !this.cutIn) {
       this.idle = 0;
       const next = this.steps.find((st) => !st.done);
       if (next && this.hintedStep !== next.id) {
         this.hintedStep = next.id;
+        this.nudgeCount += 1;
         this.karaMode = "attention";
         this.karaSay(next.hint);
         gameAudio.kara();
@@ -437,7 +487,7 @@ export class ReadyEngine {
       if (n.item === "flashlight") {
         this.flashlight = true;
         this.mark("flashlight");
-        this.startFlashlightLesson(this.drill === "power-out");
+        this.startFlashlightLesson(this.drill === "power-out", n.x, n.y);
       } else if (n.item === "water") {
         this.startWaterLesson();
       }
@@ -496,7 +546,7 @@ export class ReadyEngine {
       return;
     }
     if (n.kind === "kit-station") {
-      const have = this.profile.plan.kitItems.every((id) => this.collected.has(id));
+      const have = this.effectiveKitItems.every((id) => this.collected.has(id));
       if (have) {
         this.mark("station");
         this.dialogue = {
@@ -543,7 +593,7 @@ export class ReadyEngine {
       }
     } else if (this.drill === "pack-kit") {
       if (
-        this.profile.plan.kitItems.every((id) => this.collected.has(id)) &&
+        this.effectiveKitItems.every((id) => this.collected.has(id)) &&
         this.steps.find((s) => s.id === "station")?.done
       ) {
         this.complete = true;
@@ -555,8 +605,10 @@ export class ReadyEngine {
     }
     if (this.complete && !this.finishPosted) {
       this.finishPosted = true;
-      const done = this.steps.filter((s) => s.done).length;
-      const stars = done === this.steps.length ? 3 : done > this.steps.length / 2 ? 2 : 1;
+      // Every drill finishes once its steps are done — there's no fail state.
+      // Stars instead reflect how independently the child got there: fewer
+      // nudges from Kara means a higher rating, not a faster or "correcter" run.
+      const stars = this.nudgeCount === 0 ? 3 : this.nudgeCount <= 2 ? 2 : 1;
       const summary = this.summaryText();
       window.setTimeout(() => this.onComplete?.(stars, summary), 900);
     }
@@ -589,7 +641,7 @@ export class ReadyEngine {
     }
   }
 
-  private startFlashlightLesson(afterOutage: boolean) {
+  private startFlashlightLesson(afterOutage: boolean, x?: number, y?: number) {
     if (this.taught.has("flashlight")) {
       this.karaSay(
         afterOutage
@@ -599,6 +651,9 @@ export class ReadyEngine {
       return;
     }
     this.taught.add("flashlight");
+    // First time only: a short staged close-up on the flashlight, then back to
+    // normal play once the battery check is answered (see chooseLesson).
+    if (x != null && y != null) this.cutIn = { x, y };
     this.talkQueue = [
       { speaker: "Kara", text: "Oh! You found the flashlight." },
       { speaker: "Kara", text: "A flashlight only helps if it works when you need it." },
@@ -653,8 +708,9 @@ export class ReadyEngine {
       hint: this.currentHint(),
       prompt: n ? n.label : null,
       playerName: this.playerName,
+      cutIn: !!this.cutIn,
     };
-    const key = `${hud.roomName}|${n?.id ?? ""}|${hud.hint}|${hud.dialogue?.text ?? ""}|${(hud.choices ?? []).map((c) => c.id).join(",")}|${this.steps.map((s) => (s.done ? 1 : 0)).join("")}|${hud.prompt ?? ""}`;
+    const key = `${hud.roomName}|${n?.id ?? ""}|${hud.hint}|${hud.dialogue?.text ?? ""}|${(hud.choices ?? []).map((c) => c.id).join(",")}|${this.steps.map((s) => (s.done ? 1 : 0)).join("")}|${hud.prompt ?? ""}|${hud.cutIn ? 1 : 0}`;
     if (key === this.hudKey) return;
     this.hudKey = key;
     this.onHud?.(hud);
@@ -665,6 +721,10 @@ export class ReadyEngine {
     return cssW < 500 ? 0.5 : 0.55;
   }
 
+  private static easeInOut(t: number) {
+    return t * t * (3 - 2 * t);
+  }
+
   private draw() {
     const ctx = this.ctx;
     const w = this.canvas.clientWidth;
@@ -673,13 +733,27 @@ export class ReadyEngine {
     ctx.fillStyle = "#2a3a2c";
     ctx.fillRect(0, 0, w, h);
 
-    const z = this.zoom();
-    const sx = this.reduced ? 0 : (Math.random() - 0.5) * this.shake;
-    const sy = this.reduced ? 0 : (Math.random() - 0.5) * this.shake;
+    const t = ReadyEngine.easeInOut(this.cutInT);
+    const baseZ = this.zoom();
+    const closeZ = baseZ * 4.2;
+    const z = baseZ + (closeZ - baseZ) * t;
+
+    // Close-up focuses a little above the pickup point (chest/face height, not the floor icon).
+    const targetX = this.cutIn?.x ?? this.px;
+    const targetY = (this.cutIn?.y ?? this.py) - 30;
+    const fx = this.camX + (targetX - this.camX) * t;
+    const fy = this.camY + (targetY - this.camY) * t;
+
+    // A low/near-floor look: the further into the cut-in, the lower the focus
+    // point sits in frame, as if the camera rose up from near the ground.
+    const anchorY = h / 2 + (h * 0.7 - h / 2) * t;
+
+    const sx = this.reduced || t > 0.05 ? 0 : (Math.random() - 0.5) * this.shake;
+    const sy = this.reduced || t > 0.05 ? 0 : (Math.random() - 0.5) * this.shake;
     ctx.save();
-    ctx.translate(w / 2 + sx, h / 2 + sy);
+    ctx.translate(w / 2 + sx, anchorY + sy);
     ctx.scale(z, z);
-    ctx.translate(-this.camX, -this.camY);
+    ctx.translate(-fx, -fy);
 
     this.drawRooms(ctx);
     const drawables: { y: number; draw: () => void }[] = [];
@@ -711,8 +785,38 @@ export class ReadyEngine {
     }
 
     if (this.powerOut) this.drawDark(ctx, w, h, z);
+    if (t > 0.01) this.drawCutInLight(ctx, fx, fy, t);
 
     ctx.restore();
+
+    if (t > 0.01) this.drawCutInVignette(ctx, w, h, t);
+  }
+
+  /** Warm spotlight on the staged subject, in world space (moves with the scene). */
+  private drawCutInLight(ctx: CanvasRenderingContext2D, fx: number, fy: number, t: number) {
+    const r = 420;
+    const g = ctx.createRadialGradient(fx, fy - 10, 20, fx, fy - 10, r);
+    g.addColorStop(0, `rgba(255, 224, 176, ${0.34 * t})`);
+    g.addColorStop(0.45, `rgba(255, 196, 132, ${0.14 * t})`);
+    g.addColorStop(1, "rgba(20, 16, 10, 0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(fx - r, fy - r, r * 2, r * 2);
+  }
+
+  /** Cinematic frame darkening, in screen space (fixed, doesn't move with the scene). */
+  private drawCutInVignette(ctx: CanvasRenderingContext2D, w: number, h: number, t: number) {
+    const g = ctx.createRadialGradient(
+      w / 2,
+      h * 0.62,
+      Math.min(w, h) * 0.18,
+      w / 2,
+      h * 0.55,
+      Math.max(w, h) * 0.75,
+    );
+    g.addColorStop(0, "rgba(10, 8, 6, 0)");
+    g.addColorStop(1, `rgba(8, 6, 4, ${0.55 * t})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
   }
 
   private drawRooms(ctx: CanvasRenderingContext2D) {
@@ -756,12 +860,15 @@ export class ReadyEngine {
           room.y + room.h * 0.5,
           Math.max(room.w, room.h) * 0.72,
         );
-        g.addColorStop(0, "rgba(255, 236, 210, 0.16)");
-        g.addColorStop(1, "rgba(40, 28, 18, 0.18)");
+        g.addColorStop(0, "rgba(255, 220, 172, 0.22)");
+        g.addColorStop(0.6, "rgba(255, 200, 140, 0.08)");
+        g.addColorStop(1, "rgba(36, 24, 16, 0.2)");
         ctx.fillStyle = g;
         ctx.fillRect(room.x, room.y, room.w, room.h);
       }
       ctx.restore();
+
+      if (!outdoor) this.drawRoomDecor(ctx, room);
 
       ctx.lineJoin = "round";
       ctx.strokeStyle = "#6a5340";
@@ -770,6 +877,11 @@ export class ReadyEngine {
       ctx.strokeStyle = "#c4b49a";
       ctx.lineWidth = 6;
       ctx.strokeRect(room.x + 11, room.y + 11, room.w - 22, room.h - 22);
+      if (!outdoor) {
+        ctx.strokeStyle = "rgba(63, 47, 34, 0.4)";
+        ctx.lineWidth = 4;
+        ctx.strokeRect(room.x + 17, room.y + 17, room.w - 34, room.h - 34);
+      }
 
       ctx.fillStyle = outdoor ? "rgba(245, 240, 230, 0.72)" : "rgba(255, 248, 236, 0.78)";
       ctx.font = "600 13px Nunito, sans-serif";
@@ -780,6 +892,55 @@ export class ReadyEngine {
         const img = this.images.wood;
         if (img) ctx.drawImage(img, r.x, r.y, r.w, r.h);
       }
+    }
+  }
+
+  /** Restrained, low-cost decor so rooms read as finished rather than blocked out. */
+  private drawRoomDecor(ctx: CanvasRenderingContext2D, room: Rect & { id: string }) {
+    const rugRooms: Record<string, { color: string; edge: string }> = {
+      bedroom: { color: "#c9dce6", edge: "#9db8c6" },
+      living: { color: "#d9c9a6", edge: "#b79f76" },
+      bathroom: { color: "#cfe3df", edge: "#a9c4bd" },
+      hall: { color: "#c9a678", edge: "#a8825a" },
+    };
+    const rug = rugRooms[room.id];
+    if (rug) {
+      const rw = Math.min(room.w * 0.34, 170);
+      const rh = Math.min(room.h * 0.22, 96);
+      const rx = room.x + room.w * 0.6;
+      const ry = room.y + room.h - rh - 34;
+      const radius = 14;
+      ctx.save();
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = "rgba(20, 14, 8, 0.14)";
+      ctx.beginPath();
+      ctx.roundRect(rx + 4, ry + 6, rw, rh, radius);
+      ctx.fill();
+      ctx.fillStyle = rug.color;
+      ctx.beginPath();
+      ctx.roundRect(rx, ry, rw, rh, radius);
+      ctx.fill();
+      ctx.strokeStyle = rug.edge;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.roundRect(rx + 6, ry + 6, rw - 12, rh - 12, radius * 0.6);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    const frameRooms = new Set(["living", "kitchen", "bedroom"]);
+    if (frameRooms.has(room.id) && room.w > 200) {
+      const fx = room.x + room.w * 0.5 - 22;
+      const fy = room.y + 24;
+      ctx.save();
+      ctx.fillStyle = "#5a4530";
+      ctx.fillRect(fx, fy, 44, 32);
+      ctx.fillStyle = "#eadfc8";
+      ctx.fillRect(fx + 4, fy + 4, 36, 24);
+      ctx.strokeStyle = "rgba(90, 69, 48, 0.55)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(fx + 4, fy + 4, 36, 24);
+      ctx.restore();
     }
   }
 
@@ -980,6 +1141,21 @@ export class ReadyEngine {
         this.injected = codes;
         if (codes.length) this.dialogue = null;
       },
+      teleport: (x: number, y: number) => {
+        this.px = x;
+        this.py = y;
+        this.camX = x;
+        this.camY = y;
+      },
+      debug: () => ({
+        dialogue: this.dialogue,
+        pendingChoices: this.pendingChoices,
+        cutIn: this.cutIn,
+        cutInT: this.cutInT,
+        px: this.px,
+        py: this.py,
+        collected: [...this.collected],
+      }),
     };
   }
 }
@@ -990,6 +1166,8 @@ declare global {
       getYaw: () => number;
       getSpeed: () => number;
       setKeys?: (codes: string[]) => void;
+      teleport?: (x: number, y: number) => void;
+      debug?: () => unknown;
     };
     ReadyHouse?: {
       loadProfile: (p: FamilyProfile) => void;
