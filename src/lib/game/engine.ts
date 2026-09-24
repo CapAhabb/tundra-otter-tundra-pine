@@ -94,6 +94,8 @@ export class ReadyEngine {
   camX = 0;
   camY = 0;
   running = false;
+  private destroyed = false;
+  private resizeObserver: ResizeObserver | null = null;
   acc = 0;
   last = 0;
   raf = 0;
@@ -168,13 +170,23 @@ export class ReadyEngine {
     const entries = await Promise.all(
       Object.entries(ASSETS).map(async ([k, src]) => [k, await loadImage(src)] as const),
     );
+    // stop() can run while the image loads above are still in flight (e.g. an
+    // effect cleanup firing before this async work resolves). Without this
+    // guard, a "stopped" engine would resurrect itself afterward: rebinding
+    // window key listeners, starting its own render loop, and overwriting
+    // window.__controlsTest — a second, invisible-but-live engine racing the
+    // real one on the same canvas and keyboard, each with its own dialogue
+    // state. That's what made a dismissed line (or a cut-in) look like it
+    // randomly came back: it was a different, stale engine instance re-
+    // asserting itself.
+    if (this.destroyed) return;
     this.images = Object.fromEntries(
       entries.filter((e): e is readonly [string, HTMLImageElement] => e[1] != null),
     );
     this.resize();
     this.bind();
-    const ro = new ResizeObserver(() => this.resize());
-    if (this.canvas.parentElement) ro.observe(this.canvas.parentElement);
+    this.resizeObserver = new ResizeObserver(() => this.resize());
+    if (this.canvas.parentElement) this.resizeObserver.observe(this.canvas.parentElement);
     this.running = true;
     this.last = performance.now();
     let drillLine = `Find everyone in the ${this.profile.familyName} family, then meet at ${this.profile.plan.meetingPlace}.`;
@@ -200,9 +212,11 @@ export class ReadyEngine {
   }
 
   stop() {
+    this.destroyed = true;
     this.running = false;
     cancelAnimationFrame(this.raf);
     this.unbind();
+    this.resizeObserver?.disconnect();
     if (window.__controlsTest) delete window.__controlsTest;
   }
 
@@ -986,7 +1000,23 @@ export class ReadyEngine {
     if (img) {
       const dw = img.width;
       const dh = img.height;
-      ctx.drawImage(img, this.px - dw / 2, this.py - dh + 8, dw, dh);
+      // maya.png/leo.png are single static portraits (no walk-cycle frames),
+      // so this can't swap in real leg-stride art. It steers/faces the
+      // existing art toward the direction of travel (mirrored when walking
+      // left) and adds a small footstep bounce tied to walkT, which is 0
+      // whenever the player isn't moving — so she's perfectly still at rest.
+      const bob = this.reduced ? 0 : Math.abs(Math.sin(this.walkT * 2)) * -4;
+      const topY = this.py - dh + 8 + bob;
+      const flip = this.dir === "left";
+      if (flip) {
+        ctx.save();
+        ctx.translate(this.px, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(img, -dw / 2, topY, dw, dh);
+        ctx.restore();
+      } else {
+        ctx.drawImage(img, this.px - dw / 2, topY, dw, dh);
+      }
     }
     this.drawKara(ctx);
   }
