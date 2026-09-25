@@ -328,6 +328,14 @@ export class ReadyEngine {
           "Good — it's still worth double-checking with your parents, so you're both certain.",
         ),
       );
+      this.karaSay(
+        tierText(
+          this.ageTier,
+          "And if water ever runs low, a grown-up can boil it for a full minute to make it safe again.",
+          "And if you're ever running low, boiling water for a full minute makes it safe to drink again — never drink flood or storm water.",
+          "And if supplies ever run short, boiling water for a full minute (or a purification tablet) makes it safe again — never drink flood or storm water, even if it looks clear.",
+        ),
+      );
     } else if (id === "water-not-sure") {
       saveChildObservation("water", "Child is unsure where extra water is.");
       this.karaSay(
@@ -336,6 +344,95 @@ export class ReadyEngine {
           "That's okay. Ask a grown-up to show you.",
           "That’s okay. Get with your parents and discuss where extra water is kept, so you’ll know if you ever need it.",
           "That’s a completely fair answer — ask your parents to walk you through it once, and you'll always know.",
+        ),
+      );
+      this.karaSay(
+        tierText(
+          this.ageTier,
+          "Good to know either way: a grown-up can boil water for a full minute to make it safe if you ever run low.",
+          "Good to know either way: boiling water for a full minute makes it safe to drink if you ever run low — never drink flood or storm water.",
+          "Worth knowing either way: boiling water for a full minute (or a purification tablet) makes it safe if supplies run short — never drink flood or storm water, even if it looks clear.",
+        ),
+      );
+    } else if (id === "gen-outside") {
+      saveChildObservation("generator", "Child knows generators must run outside, away from windows and doors.");
+      this.karaSay(
+        tierText(
+          this.ageTier,
+          "That's right! Outside and far from windows keeps everyone safe.",
+          "That's right. Outside, far from windows, doors, and vents — that's the only safe spot for it.",
+          "Exactly — outside, well clear of windows, doors, and vents, is the only safe place for it to run.",
+        ),
+      );
+    } else if (id === "gen-garage") {
+      saveChildObservation("generator", "Child initially thought a garage was safe for a running generator.");
+      this.karaSay(
+        tierText(
+          this.ageTier,
+          "Actually, never in the garage, even with the door open — the gas can hurt you without you smelling it. Always outside.",
+          "Actually, never — even in a garage with the door open. It makes carbon monoxide, and you can't see or smell it building up. Always run it outside, away from windows and doors.",
+          "Actually, never — even in a garage with the door open, carbon monoxide can build up fast without any smell to warn you. Always run it outside, well away from windows and doors.",
+        ),
+      );
+    } else if (id === "medkit-know") {
+      saveChildObservation("medkit", "Child knows what's in the first-aid kit.");
+      this.karaSay(
+        tierText(
+          this.ageTier,
+          "Great! Bandages are for small cuts and scrapes.",
+          "Great. Just remember: it's for small cuts and scrapes — a grown-up handles anything bigger.",
+          "Good — it's for small cuts and scrapes; anything bigger is a grown-up's job, every time.",
+        ),
+      );
+    } else if (id === "medkit-not-sure") {
+      saveChildObservation("medkit", "Child is unsure what's in the first-aid kit.");
+      this.karaSay(
+        tierText(
+          this.ageTier,
+          "That's okay. Ask a grown-up to show you what's inside.",
+          "That’s okay. Ask a grown-up to go through it with you sometime, so it's not new if you ever need it.",
+          "Fair enough — ask a grown-up to walk through it with you once, so nothing's a surprise later.",
+        ),
+      );
+    } else if (id === "radio-know") {
+      saveChildObservation("radio", "Child knows how to use the emergency radio.");
+      this.karaSay(
+        tierText(
+          this.ageTier,
+          "Nice! It works even when the power is out.",
+          "Nice. It keeps working on batteries or a hand crank, so you can still hear news with no power.",
+          "Good to know — battery or hand-crank power means it still works when the outlets and cell towers don't.",
+        ),
+      );
+    } else if (id === "radio-not-sure") {
+      saveChildObservation("radio", "Child is unsure how to use the emergency radio.");
+      this.karaSay(
+        tierText(
+          this.ageTier,
+          "That's okay. Ask a grown-up to show you the switch.",
+          "That’s okay. Ask a grown-up to show you the switch — it's usually just batteries or a hand crank.",
+          "That's fine — ask a grown-up to show you once; it's almost always just batteries or a hand crank.",
+        ),
+      );
+    } else if (id === "whistle-try") {
+      saveChildObservation("whistle", "Child practiced the three-blast help signal.");
+      gameAudio.success();
+      this.karaSay(
+        tierText(
+          this.ageTier,
+          "That's the sound! Three blasts means come find me.",
+          "That's it. Three blasts carries a lot farther than shouting, and it doesn't tire out your voice.",
+          "Exactly — three blasts carries much farther than shouting, and it won't wear out your voice like yelling would.",
+        ),
+      );
+    } else if (id === "whistle-later") {
+      saveChildObservation("whistle", "Child deferred practicing the whistle signal.");
+      this.karaSay(
+        tierText(
+          this.ageTier,
+          "Okay. Remember: three blasts means come find me.",
+          "Okay. Just remember the pattern: three sharp blasts means come find me.",
+          "No rush — just remember the pattern for later: three sharp blasts means come find me.",
         ),
       );
     }
@@ -510,6 +607,12 @@ export class ReadyEngine {
         this.startFlashlightLesson(this.drill === "power-out", n.x, n.y);
       } else if (n.item === "water") {
         this.startWaterLesson();
+      } else if (n.item === "medkit") {
+        this.startMedkitLesson();
+      } else if (n.item === "radio") {
+        this.startRadioLesson();
+      } else if (n.item === "whistle") {
+        this.startWhistleLesson();
       }
       this.maybeFinish();
       return;
@@ -532,10 +635,7 @@ export class ReadyEngine {
       this.mark("generator");
       this.powerOut = false;
       gameAudio.success();
-      this.dialogue = {
-        speaker: "Kara",
-        text: "This home has a backup generator. It can help power some things during an outage, but not everything.",
-      };
+      this.startGeneratorLesson();
       this.maybeFinish();
       return;
     }
@@ -704,6 +804,82 @@ export class ReadyEngine {
     this.scheduledChoices = [
       { id: "water-yes", label: "Yes" },
       { id: "water-not-sure", label: "Not sure" },
+    ];
+    this.advanceTalk();
+  }
+
+  private startGeneratorLesson() {
+    if (this.taught.has("generator")) {
+      this.karaSay(
+        "This home has a backup generator. It can help power some things during an outage, but not everything.",
+      );
+      return;
+    }
+    this.taught.add("generator");
+    this.talkQueue = [
+      {
+        speaker: "Kara",
+        text: "This home has a backup generator. It can help power some things during an outage, but not everything.",
+      },
+      {
+        speaker: "Kara",
+        text: "It also makes a gas you can't see or smell. Where should it always run?",
+      },
+    ];
+    this.scheduledChoices = [
+      { id: "gen-outside", label: "Outside, away from windows" },
+      { id: "gen-garage", label: "In the garage" },
+    ];
+    this.advanceTalk();
+  }
+
+  private startMedkitLesson() {
+    if (this.taught.has("medkit")) {
+      this.karaSay(`You found the first-aid kit. ${this.collected.size} of ${this.profile.plan.kitItems.length} kit items.`);
+      return;
+    }
+    this.taught.add("medkit");
+    this.talkQueue = [
+      { speaker: "Kara", text: "You found the first-aid kit. Do you know what's inside, like where the bandages are?" },
+    ];
+    this.scheduledChoices = [
+      { id: "medkit-know", label: "Yes" },
+      { id: "medkit-not-sure", label: "Not sure" },
+    ];
+    this.advanceTalk();
+  }
+
+  private startRadioLesson() {
+    if (this.taught.has("radio")) {
+      this.karaSay(`You found the radio. ${this.collected.size} of ${this.profile.plan.kitItems.length} kit items.`);
+      return;
+    }
+    this.taught.add("radio");
+    this.talkQueue = [
+      {
+        speaker: "Kara",
+        text: "This radio doesn't need a wall plug. Do you know how to turn it on?",
+      },
+    ];
+    this.scheduledChoices = [
+      { id: "radio-know", label: "Yes" },
+      { id: "radio-not-sure", label: "Not sure" },
+    ];
+    this.advanceTalk();
+  }
+
+  private startWhistleLesson() {
+    if (this.taught.has("whistle")) {
+      this.karaSay(`You found the whistle. ${this.collected.size} of ${this.profile.plan.kitItems.length} kit items.`);
+      return;
+    }
+    this.taught.add("whistle");
+    this.talkQueue = [
+      { speaker: "Kara", text: "Three sharp blasts on this whistle means \"come find me.\" Want to try it?" },
+    ];
+    this.scheduledChoices = [
+      { id: "whistle-try", label: "Try it" },
+      { id: "whistle-later", label: "Later" },
     ];
     this.advanceTalk();
   }
