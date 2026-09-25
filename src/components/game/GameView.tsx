@@ -19,7 +19,9 @@ export function GameView() {
   const [hud, setHud] = useState<HudState | null>(null);
   const [paused, setPaused] = useState(false);
   const [muted, setMuted] = useState(false);
-  const [speakOn, setSpeakOn] = useState(false);
+  // Kara's voice narrates every cue card by default; the Captions button lets
+  // a player opt out, and Mute still silences narration along with SFX.
+  const [speakOn, setSpeakOn] = useState(true);
   const lastSpoken = useRef("");
   const stickId = useRef<number | null>(null);
 
@@ -40,6 +42,12 @@ export function GameView() {
   useEffect(() => {
     engineRef.current?.resize();
   }, [paused]);
+
+  // Keep the GameAudio singleton's speakOn flag in sync with the toggle,
+  // including the initial mount, so the default (on) actually takes effect.
+  useEffect(() => {
+    gameAudio.setSpeakOn(speakOn);
+  }, [speakOn]);
 
   useEffect(() => {
     const text = hud?.dialogue?.text ?? "";
@@ -116,12 +124,11 @@ export function GameView() {
             <div className="pointer-events-auto flex gap-2">
               <Button
                 size="icon"
-                variant="secondary"
+                variant={speakOn ? "default" : "secondary"}
                 aria-label={speakOn ? "Turn off read-aloud" : "Read to me"}
                 onClick={() => {
                   const next = !speakOn;
                   setSpeakOn(next);
-                  gameAudio.setSpeakOn(next);
                   if (next && hud.dialogue?.text) gameAudio.speak(hud.dialogue.text);
                 }}
               >
