@@ -90,6 +90,8 @@ export class ReadyEngine {
   vy = 0;
   yaw = Math.PI;
   dir: Dir = "down";
+  /** -1..1, eased toward facing left/right; drives a smooth turn instead of an instant mirror flip. */
+  facingScale = 1;
   walkT = 0;
   camX = 0;
   camY = 0;
@@ -401,13 +403,17 @@ export class ReadyEngine {
       this.yaw = yawFromMove(mx, my);
       if (Math.abs(mx) > Math.abs(my)) this.dir = mx < 0 ? "left" : "right";
       else this.dir = my < 0 ? "up" : "down";
-      this.walkT += dt * 7;
+      this.walkT = (this.walkT + dt * 7) % (Math.PI * 2);
       gameAudio.footstep();
       this.idle = 0;
     } else {
       this.walkT = 0;
       this.idle += dt;
     }
+    // Ease the mirror flip toward the last horizontal direction instead of snapping,
+    // so turning around reads as a smooth turn rather than an instant pop.
+    const facingTarget = this.dir === "left" ? -1 : 1;
+    this.facingScale += (facingTarget - this.facingScale) * Math.min(1, dt * 12);
 
     const nx = this.px + this.vx * dt;
     const ny = this.py + this.vy * dt;
@@ -913,6 +919,7 @@ export class ReadyEngine {
   private drawRoomDecor(ctx: CanvasRenderingContext2D, room: Rect & { id: string }) {
     const rugRooms: Record<string, { color: string; edge: string }> = {
       bedroom: { color: "#c9dce6", edge: "#9db8c6" },
+      kidsroom: { color: "#f0d9a6", edge: "#cdaf6f" },
       living: { color: "#d9c9a6", edge: "#b79f76" },
       bathroom: { color: "#cfe3df", edge: "#a9c4bd" },
       hall: { color: "#c9a678", edge: "#a8825a" },
@@ -942,7 +949,7 @@ export class ReadyEngine {
       ctx.restore();
     }
 
-    const frameRooms = new Set(["living", "kitchen", "bedroom"]);
+    const frameRooms = new Set(["living", "kitchen", "bedroom", "kidsroom"]);
     if (frameRooms.has(room.id) && room.w > 200) {
       const fx = room.x + room.w * 0.5 - 22;
       const fy = room.y + 24;
@@ -995,28 +1002,67 @@ export class ReadyEngine {
     return this.images.maya;
   }
 
+  /**
+   * maya.png/leo.png are single static full-body portraits (no walk-cycle
+   * frames), so this can't swap in real animated art. Instead it cuts each
+   * portrait into a torso piece and two leg pieces at the hip line and
+   * swings the legs as pendulums around the hip pivot (in opposite phase),
+   * with a small counter-rotating torso sway so the arms read as
+   * coordinated rather than static. Because each leg pivots from the hip,
+   * the foot is lowest (grounded) at the middle of its swing and lifts
+   * away from the ground at the extremes — it plants instead of sliding.
+   * walkT is 0 whenever the player isn't moving, which collapses every
+   * angle back to 0 for a clean idle pose.
+   */
   private drawPlayer(ctx: CanvasRenderingContext2D) {
     const img = this.kidSheet();
     if (img) {
-      const dw = img.width;
-      const dh = img.height;
-      // maya.png/leo.png are single static portraits (no walk-cycle frames),
-      // so this can't swap in real leg-stride art. It steers/faces the
-      // existing art toward the direction of travel (mirrored when walking
-      // left) and adds a small footstep bounce tied to walkT, which is 0
-      // whenever the player isn't moving — so she's perfectly still at rest.
-      const bob = this.reduced ? 0 : Math.abs(Math.sin(this.walkT * 2)) * -4;
-      const topY = this.py - dh + 8 + bob;
-      const flip = this.dir === "left";
-      if (flip) {
-        ctx.save();
-        ctx.translate(this.px, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(img, -dw / 2, topY, dw, dh);
-        ctx.restore();
-      } else {
-        ctx.drawImage(img, this.px - dw / 2, topY, dw, dh);
-      }
+      const w = img.width;
+      const h = img.height;
+      const hipY = Math.round(h * 0.62);
+      const overlap = 3;
+      const legW = w / 2;
+      const legH = h - hipY + overlap;
+
+      const walking = !this.reduced && this.walkT > 0;
+      const legSwing = walking ? Math.sin(this.walkT) * 0.4 : 0;
+      const legSwingOpp = walking ? Math.sin(this.walkT + Math.PI) * 0.4 : 0;
+      const torsoSway = walking ? Math.sin(this.walkT + Math.PI / 2) * 0.07 : 0;
+      const bob = walking
+        ? Math.abs(Math.sin(this.walkT * 2)) * -2.5
+        : this.reduced
+          ? 0
+          : Math.sin(this.idle * 1.4) * 0.6;
+
+      const topY = this.py - h + 8 + bob;
+      const hipScreenY = topY + hipY;
+
+      ctx.save();
+      ctx.translate(this.px, 0);
+      ctx.scale(this.facingScale, 1);
+
+      // Left leg (image-space), pivoting at the hip.
+      ctx.save();
+      ctx.translate(-w / 2 + legW / 2, hipScreenY);
+      ctx.rotate(legSwing);
+      ctx.drawImage(img, 0, hipY - overlap, legW, legH, -legW / 2, -overlap, legW, legH);
+      ctx.restore();
+
+      // Right leg (image-space), opposite phase.
+      ctx.save();
+      ctx.translate(w / 2 - legW / 2, hipScreenY);
+      ctx.rotate(legSwingOpp);
+      ctx.drawImage(img, legW, hipY - overlap, legW, legH, -legW / 2, -overlap, legW, legH);
+      ctx.restore();
+
+      // Torso + arms + head, swaying gently opposite the legs.
+      ctx.save();
+      ctx.translate(0, hipScreenY);
+      ctx.rotate(torsoSway);
+      ctx.drawImage(img, 0, 0, w, hipY + overlap, -w / 2, -hipY, w, hipY + overlap);
+      ctx.restore();
+
+      ctx.restore();
     }
     this.drawKara(ctx);
   }
@@ -1127,20 +1173,24 @@ export class ReadyEngine {
     const leo = name.includes("leo") || name.includes("sam") || name.includes("jordan");
     const maya = name.includes("maya") || name.includes("sofia");
     const kid = leo ? this.images.leo : maya ? this.images.maya : undefined;
+    // Per-pawn phase (from position, so it's stable across frames) keeps
+    // idle pawns from bobbing in lockstep with each other or the player.
+    const phase = (it.x * 0.013 + it.y * 0.021) % (Math.PI * 2);
+    const bob = this.reduced ? 0 : Math.sin(performance.now() / 850 + phase) * 1.6;
     if (kid) {
-      ctx.drawImage(kid, it.x - kid.width / 2, it.y - kid.height + 8, kid.width, kid.height);
+      ctx.drawImage(kid, it.x - kid.width / 2, it.y - kid.height + 8 + bob, kid.width, kid.height);
     } else {
       ctx.fillStyle = "#3e6b56";
       ctx.beginPath();
-      ctx.arc(it.x, it.y - 22, 11, 0, Math.PI * 2);
+      ctx.arc(it.x, it.y - 22 + bob, 11, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#dce8e1";
       ctx.beginPath();
-      ctx.arc(it.x, it.y - 22, 6, 0, Math.PI * 2);
+      ctx.arc(it.x, it.y - 22 + bob, 6, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#3e6b56";
       ctx.beginPath();
-      ctx.ellipse(it.x, it.y - 4, 12, 14, 0, 0, Math.PI * 2);
+      ctx.ellipse(it.x, it.y - 4 + bob, 12, 14, 0, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.fillStyle = "#1b2430";

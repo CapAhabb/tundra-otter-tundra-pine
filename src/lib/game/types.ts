@@ -73,6 +73,7 @@ export type FloorId =
 export type RoomId =
   | "yard"
   | "bedroom"
+  | "kidsroom"
   | "bathroom"
   | "utility"
   | "living"

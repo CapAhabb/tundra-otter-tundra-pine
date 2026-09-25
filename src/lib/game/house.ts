@@ -75,16 +75,33 @@ function placeItem(
 export function buildHouse(profile: FamilyProfile, shell?: VisualShell | null): HouseWorld {
   const home = profile.homeType;
   const isApt = home === "apartment";
+  const hasKidsRoom = !isApt && profile.members.filter((m) => m.role === "child").length > 1;
   const yardFloor: FloorId =
-    home === "desert" || shell === "country" && home === "desert"
+    home === "desert"
       ? "sand"
       : shell === "country"
         ? "grass"
         : home === "forest"
           ? "forest"
-          : home === "desert"
-            ? "sand"
-            : "grass";
+          : "grass";
+
+  // Row widths are kept equal across the grid so the footprint reads as one
+  // rectangular house instead of a jagged outline. GROW is the size bump
+  // that makes every home feel bigger than before: homes with two-plus kids
+  // spend it on a visible new room (the kids' room); everyone else's top
+  // row absorbs it into the utility/closet so every row still lines up.
+  const GROW = isApt ? 200 : 340;
+  const W_BED = 430;
+  const W_KIDS = hasKidsRoom ? GROW : 0;
+  const W_BATH = 270;
+  const W_UTIL = (isApt ? 420 : 836) + (hasKidsRoom ? 0 : GROW);
+  const TOTAL_W = W_BED + W_KIDS + W_BATH + W_UTIL;
+
+  const W_LIVING = 780;
+  const W_KITCHEN = TOTAL_W - W_LIVING;
+
+  const W_GARAGE = isApt ? 0 : 430;
+  const W_HALL = TOTAL_W - W_GARAGE;
 
   const rooms: Room[] = [];
   if (!isApt) {
@@ -93,38 +110,49 @@ export function buildHouse(profile: FamilyProfile, shell?: VisualShell | null): 
       name: home === "desert" ? "Yard" : home === "forest" ? "Treeside" : "Yard",
       x: 32,
       y: 28,
-      w: 1536,
+      w: TOTAL_W,
       h: 220,
       floor: yardFloor,
     });
   }
 
   const topY = isApt ? 28 : 248;
-  rooms.push(
-    {
-      id: "bedroom",
-      name: "Bedroom",
-      x: 32,
+  rooms.push({
+    id: "bedroom",
+    name: "Bedroom",
+    x: 32,
+    y: topY,
+    w: W_BED,
+    h: 320,
+    floor: "carpet",
+  });
+  if (hasKidsRoom) {
+    rooms.push({
+      id: "kidsroom",
+      name: "Kid's room",
+      x: 32 + W_BED,
       y: topY,
-      w: 430,
+      w: W_KIDS,
       h: 320,
       floor: "carpet",
-    },
+    });
+  }
+  rooms.push(
     {
       id: "bathroom",
       name: "Bathroom",
-      x: 462,
+      x: 32 + W_BED + W_KIDS,
       y: topY,
-      w: 270,
+      w: W_BATH,
       h: 320,
       floor: "bath",
     },
     {
       id: "utility",
       name: isApt ? "Closet" : profile.plan.hasBasement ? "Utility" : "Utility",
-      x: 732,
+      x: 32 + W_BED + W_KIDS + W_BATH,
       y: topY,
-      w: isApt ? 420 : 836,
+      w: W_UTIL,
       h: 320,
       floor: "concrete",
     },
@@ -137,16 +165,16 @@ export function buildHouse(profile: FamilyProfile, shell?: VisualShell | null): 
       name: "Living room",
       x: 32,
       y: midY,
-      w: 780,
+      w: W_LIVING,
       h: 340,
       floor: "wood",
     },
     {
       id: "kitchen",
       name: "Kitchen",
-      x: 812,
+      x: 32 + W_LIVING,
       y: midY,
-      w: isApt ? 340 : 756,
+      w: W_KITCHEN,
       h: 340,
       floor: "tile",
     },
@@ -160,16 +188,16 @@ export function buildHouse(profile: FamilyProfile, shell?: VisualShell | null): 
         name: "Garage",
         x: 32,
         y: botY,
-        w: 430,
+        w: W_GARAGE,
         h: 210,
         floor: "concrete",
       },
       {
         id: "hall",
         name: "Entry",
-        x: 462,
+        x: 32 + W_GARAGE,
         y: botY,
-        w: 1106,
+        w: W_HALL,
         h: 210,
         floor: "wood",
       },
@@ -180,7 +208,7 @@ export function buildHouse(profile: FamilyProfile, shell?: VisualShell | null): 
       name: "Hall / lobby door",
       x: 32,
       y: botY,
-      w: 1120,
+      w: W_HALL,
       h: 210,
       floor: "wood",
     });
@@ -191,6 +219,7 @@ export function buildHouse(profile: FamilyProfile, shell?: VisualShell | null): 
 
   // Door corridors
   walk.push(door(byId.bedroom, "s", 160));
+  if (byId.kidsroom) walk.push(door(byId.kidsroom, "s", (W_KIDS - 84) / 2));
   walk.push(door(byId.bathroom, "s", 90));
   walk.push(door(byId.utility, "s", 80));
   walk.push(door(byId.living, "e", 120));
@@ -210,6 +239,17 @@ export function buildHouse(profile: FamilyProfile, shell?: VisualShell | null): 
   props.push(
     prop({ kind: "bed", x: bedR.x + 48, y: bedR.y + 48, w: 150, h: 170, collide: true }, pi++),
   );
+
+  if (byId.kidsroom) {
+    const kidsR = byId.kidsroom;
+    props.push(
+      prop({ kind: "bed", x: kidsR.x + 30, y: kidsR.y + 40, w: 120, h: 140, collide: true }, pi++),
+      prop(
+        { kind: "bed", x: kidsR.x + kidsR.w - 150, y: kidsR.y + 40, w: 120, h: 140, collide: true },
+        pi++,
+      ),
+    );
+  }
 
   const liv = byId.living;
   props.push(
@@ -326,13 +366,24 @@ export function buildHouse(profile: FamilyProfile, shell?: VisualShell | null): 
 
   const playerSkipped = true;
   void playerSkipped;
-  const spots: Array<{ room: string; ox: number; oy: number }> = [
+  const adultSpots: Array<{ room: string; ox: number; oy: number }> = [
     { room: "living", ox: 240, oy: 240 },
     { room: "kitchen", ox: 180, oy: 240 },
-    { room: "bedroom", ox: 280, oy: 240 },
   ];
-  profile.members.forEach((m, i) => {
-    const s = spots[i % spots.length];
+  // Kids not being played land in the shared kids' room when one exists,
+  // otherwise they fall back to the single family bedroom as before.
+  const childSpots: Array<{ room: string; ox: number; oy: number }> = byId.kidsroom
+    ? [
+        { room: "kidsroom", ox: 90, oy: 200 },
+        { room: "kidsroom", ox: 230, oy: 200 },
+      ]
+    : [{ room: "bedroom", ox: 280, oy: 240 }];
+  let adultI = 0;
+  let childI = 0;
+  profile.members.forEach((m) => {
+    const isChild = m.role === "child";
+    const list = isChild ? childSpots : adultSpots;
+    const s = list[(isChild ? childI++ : adultI++) % list.length];
     const room = byId[s.room] ?? liv;
     ints.push({
       id: `fam-${m.id}`,
