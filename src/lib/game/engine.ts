@@ -452,6 +452,10 @@ export class ReadyEngine {
       this.pendingChoices = this.scheduledChoices;
       this.scheduledChoices = null;
     }
+    // A cut-in always rides along with an active talk sequence (see
+    // startFlashlightLesson/startBreakerLesson); once that sequence ends
+    // with nothing left to say and no choice pending, release the shot.
+    if (!this.dialogue && !this.pendingChoices) this.cutIn = null;
     this.karaMode = this.dialogue ? "teaching" : "idle";
     if (!this.dialogue && this.complete) this.karaMode = "success";
   }
@@ -621,12 +625,7 @@ export class ReadyEngine {
       this.breakersDone = true;
       this.mark("breaker");
       gameAudio.click();
-      this.dialogue = {
-        speaker: "Kara",
-        text: this.profile.plan.hasGenerator
-          ? "Breakers are set. If the power stays off, we start the generator next."
-          : "Breakers are set. In an apartment, the building crew handles the rest. You did your part.",
-      };
+      this.startBreakerLesson(n.x, n.y);
       this.maybeFinish();
       return;
     }
@@ -788,6 +787,48 @@ export class ReadyEngine {
     this.scheduledChoices = [
       { id: "flash-ok", label: "Checked" },
       { id: "flash-batteries", label: "Needs batteries" },
+    ];
+    this.advanceTalk();
+  }
+
+  private startBreakerLesson(x?: number, y?: number) {
+    if (this.taught.has("breaker")) {
+      this.karaSay(
+        this.profile.plan.hasGenerator
+          ? "Breakers are set. If the power stays off, we start the generator next."
+          : "Breakers are set. In an apartment, the building crew handles the rest. You did your part.",
+      );
+      return;
+    }
+    this.taught.add("breaker");
+    saveChildObservation("breaker", "Child learned why breakers get shut off before the power comes back.");
+    // Same staged close-up treatment as the flashlight: a beat on the panel
+    // itself while Kara and the player talk it through, then back to normal
+    // play once the exchange ends (cutIn clears itself in advanceTalk once
+    // the queue drains with no choices left to show).
+    if (x != null && y != null) this.cutIn = { x, y };
+    this.talkQueue = [
+      { speaker: this.playerName, text: "Ok Kara, I'm at the breaker. What do you want me to do?" },
+      {
+        speaker: "Kara",
+        text: tierText(
+          this.ageTier,
+          "Go get a grown-up, and do this together. Once they're here, you'll turn off the main switch, then every other breaker.",
+          "Go get a parent, and let's do this together. Once they're here, you'll turn off the main switch, then turn every breaker off.",
+          "Go get a parent, and let's do this together. Once they're here, you'll turn off the main switch, then turn off every breaker.",
+        ),
+      },
+      { speaker: this.playerName, text: "What's the point?" },
+      {
+        speaker: "Kara",
+        text: tierText(
+          this.ageTier,
+          "It keeps your home's power from sneaking back out onto the lines outside, where it could really hurt someone fixing them.",
+          "It lowers the chance of power feeding back out onto the grid — which could badly hurt a line worker out there trying to restore it.",
+          "It reduces the chance of backfeed into the grid, which could seriously injure a line worker out there trying to restore power.",
+        ),
+      },
+      { speaker: this.playerName, text: "Ok, I understand now." },
     ];
     this.advanceTalk();
   }
