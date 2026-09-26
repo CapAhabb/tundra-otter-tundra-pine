@@ -80,6 +80,24 @@
   font-optical-sizing: auto;
 }
 
+/* A carved/embossed wordmark: a warm brass gradient fill (echoes Kara's
+   compass mark and the parchment screens) plus a light-from-above bevel
+   shadow, instead of flat white text sitting on the title art. */
+.ns-wordmark {
+  /* Solid warm fill (not a gradient) so the word stays legible against both
+     the light sky and the dark trees behind it — depth comes entirely from
+     the bevel: a light hit from the upper-left, a dark cut on the lower-right,
+     then a soft lift shadow to seat it above the photo. */
+  color: #f6e7c4;
+  -webkit-text-stroke: 1px rgba(20, 12, 3, 0.8);
+  text-shadow:
+    -1px -1px 0 rgba(255, 252, 235, 0.7),
+    1px 1px 0 rgba(35, 20, 5, 0.9),
+    2px 2px 0 rgba(20, 11, 2, 0.75),
+    3px 3px 1px rgba(0, 0, 0, 0.55),
+    0 6px 16px rgba(0, 0, 0, 0.6);
+}
+
 .ns-parchment,
 .northstar-page {
   position: relative;

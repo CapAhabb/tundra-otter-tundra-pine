@@ -66,6 +66,36 @@ function unlock() {
   gameAudio.unlock();
 }
 
+function CornerMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" className={cn("absolute h-3.5 w-3.5 text-gold", className)}>
+      <path
+        fill="currentColor"
+        d="M10 1 L11.6 8.4 L19 10 L11.6 11.6 L10 19 L8.4 11.6 L1 10 L8.4 8.4 Z"
+      />
+    </svg>
+  );
+}
+
+function CardCorners() {
+  return (
+    <>
+      <CornerMark className="left-2 top-2" />
+      <CornerMark className="right-2 top-2" />
+      <CornerMark className="bottom-2 left-2" />
+      <CornerMark className="bottom-2 right-2" />
+    </>
+  );
+}
+
+/** Same name-based heuristic the in-game canvas uses to pick a kid's portrait art (engine.ts drawPawn) */
+function portraitFor(name: string): string | null {
+  const n = name.toLowerCase();
+  if (n.includes("leo") || n.includes("sam") || n.includes("jordan")) return "/game/leo.png";
+  if (n.includes("maya") || n.includes("sofia")) return "/game/maya.png";
+  return null;
+}
+
 function trainerMode() {
   if (typeof window === "undefined") return false;
   const q = new URLSearchParams(window.location.search);
@@ -108,7 +138,7 @@ function TitleKaraOrbit() {
     const tick = () => {
       const t = (performance.now() - start) / 1000;
       const x = 16 + (0.5 + 0.5 * Math.sin(t * 0.85)) * 300 + Math.sin(t * 1.7) * 28;
-      const y = 6 + Math.cos(t * 1.05) * 26 + Math.sin(t * 2.2) * 8;
+      const y = -34 + Math.cos(t * 1.05) * 26 + Math.sin(t * 2.2) * 8;
       const s = 0.92 + Math.sin(t * 1.4) * 0.14;
       el.style.transform = `translate(${x}px, ${y}px) scale(${s})`;
     };
@@ -119,12 +149,6 @@ function TitleKaraOrbit() {
 
   return (
     <div className="kara-stage">
-      <div className="relative z-10">
-        <h1 className="font-display mt-4 text-4xl font-semibold tracking-tight text-primary-fg sm:text-5xl">
-          Northstar Guidance
-        </h1>
-        <p className="mt-1 text-sm font-medium tracking-wide text-primary-fg/70">Event Sim</p>
-      </div>
       <div ref={flyRef} className="kara-fly title-keep-motion">
         <KaraMark uid="k" />
         <span className="kara-spark" />
@@ -162,13 +186,13 @@ export function TitleScreen() {
       <div className="absolute inset-0 bg-[linear-gradient(90deg,rgb(18_24_32/0.88)_0%,rgb(18_24_32/0.55)_48%,rgb(18_24_32/0.2)_100%)]" />
       <div className="relative z-10 mx-auto flex min-h-dvh w-full max-w-6xl flex-col justify-end gap-8 px-5 py-8 sm:justify-center sm:py-16">
         <div className="max-w-xl">
-          <Badge className="bg-primary/20 text-primary-fg">Family continuity training</Badge>
-          <TitleKaraOrbit />
-          <p className="mt-3 max-w-md text-base text-primary-fg/80 sm:text-lg">
-            A calm walk through your own home plan. Kids practice where the kit lives, what to do
-            when the lights go out, and who to find.
-          </p>
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+          <div className="relative">
+            <img src="/game/logo-preview.png" alt="Northstar Guidance — Event Sim" className="w-full max-w-lg" />
+            <div className="pointer-events-none absolute inset-0">
+              <TitleKaraOrbit />
+            </div>
+          </div>
+          <div className="mt-[34px] flex flex-col gap-3 sm:flex-row">
             <Button
               size="xl"
               onClick={() => {
@@ -501,23 +525,39 @@ export function WhoScreen() {
             today.
           </p>
         </div>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {list.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => {
-                unlock();
-                setPlayer(m.id);
-              }}
-              className="flex min-h-24 flex-col items-start rounded-[var(--radius-xl)] border border-border bg-surface p-5 text-left hover:border-primary"
-            >
-              <p className="font-display text-xl font-semibold">{m.name}</p>
-              <p className="text-sm text-muted">
-                {m.age} · {m.role}
-              </p>
-            </button>
-          ))}
+        <div className="grid gap-4 sm:grid-cols-2">
+          {list.map((m) => {
+            const portrait = portraitFor(m.name);
+            return (
+              <div
+                key={m.id}
+                className="relative flex items-center gap-4 rounded-[var(--radius-xl)] border border-border bg-surface p-5 transition-colors hover:border-primary"
+              >
+                <CardCorners />
+                {portrait ? (
+                  <img src={portrait} alt="" className="h-28 w-auto shrink-0 drop-shadow-md" />
+                ) : null}
+                <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
+                  <div>
+                    <p className="font-display text-xl font-semibold">{m.name}</p>
+                    <p className="text-sm text-muted">
+                      {m.age} · {m.role}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      unlock();
+                      setPlayer(m.id);
+                    }}
+                  >
+                    Play as {m.name}
+                    <ArrowRight />
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
         </div>
         <Button variant="ghost" className="self-start" onClick={() => setScreen("title")}>
           Back
